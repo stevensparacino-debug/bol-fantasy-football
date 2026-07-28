@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v2.3' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v2.4' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 const APP_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/'
@@ -701,40 +701,35 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       })
       if (ptsById.size === 0) throw new Error('No usable 2025 stats found in the response.')
 
-      // Page through ALL player ids (Supabase caps responses at 1,000 rows per request)
-      const allIds = []
+      // Postgres checks NOT NULL on the incoming row BEFORE resolving the conflict,
+      // so partial-column upserts ({id, pts}) always fail on this table.
+      // Instead: read full player rows page by page, merge the 2025 numbers on,
+      // and upsert the complete rows.
+      let updated = 0
       for (let from = 0; ; from += 1000) {
         const { data, error } = await supabase
-          .from('players').select('id').range(from, from + 999)
+          .from('players').select('*')
+          .order('id', { ascending: true })
+          .range(from, from + 999)
         if (error) throw error
-        allIds.push(...(data || []).map(p => String(p.id)))
-        if (!data || data.length < 1000) break
+        if (!data || data.length === 0) break
+        const merged = data
+          .filter(p => ptsById.has(String(p.id)))
+          .map(p => ({
+            ...p,
+            last_season_pts: ptsById.get(String(p.id)).pts,
+            last_season_avg: ptsById.get(String(p.id)).avg,
+          }))
+        if (merged.length > 0) {
+          const { error: upErr } = await supabase
+            .from('players').upsert(merged, { onConflict: 'id' })
+          if (upErr) throw upErr
+          updated += merged.length
+        }
+        setSeedMsg({ t: 'ok', v: `Updating… ${updated} players so far` })
+        if (data.length < 1000) break
       }
-
-      const rows = allIds
-        .filter(id => ptsById.has(id))
-        .map(id => ({
-          id,
-          last_season_pts: ptsById.get(id).pts,
-          last_season_avg: ptsById.get(id).avg,
-        }))
-      setSeedMsg({ t: 'ok', v: `Updating ${rows.length} players with 2025 points…` })
-
-      for (let i = 0; i < rows.length; i += 500) {
-        let chunk = rows.slice(i, i + 500)
-        // Belt and braces: verify this batch against the DB immediately before writing,
-        // so only players that truly exist are ever touched (update-only, never insert).
-        const { data: present, error: vErr } = await supabase
-          .from('players').select('id').in('id', chunk.map(r => r.id))
-        if (vErr) throw vErr
-        const ok = new Set((present || []).map(p => String(p.id)))
-        chunk = chunk.filter(r => ok.has(r.id))
-        if (chunk.length === 0) continue
-        const { error } = await supabase.from('players').upsert(chunk, { onConflict: 'id' })
-        if (error) throw error
-        setSeedMsg({ t: 'ok', v: `Updating… ${Math.min(i + 500, rows.length)} / ${rows.length}` })
-      }
-      setSeedMsg({ t: 'ok', v: `Done — 2025 season points imported for ${rows.length} players.` })
+      setSeedMsg({ t: 'ok', v: `Done — 2025 season points imported for ${updated} players.` })
     } catch (err) {
       setSeedMsg({ t: 'err', v: `2025 import failed: ${err.message}` })
     }
