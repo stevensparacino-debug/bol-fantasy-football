@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v4.0' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v4.2' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -313,16 +313,38 @@ function slotForPick(n, numTeams) {
 }
 
 function bestAvailable(players, draftedSet, teamPicks) {
-  // Positional needs: don't autopick a 3rd QB before you have a K, etc.
   const counts = {}
   teamPicks.forEach(p => { counts[p.position] = (counts[p.position] || 0) + 1 })
-  const need = pos => {
-    const caps = { QB: 2, RB: 6, WR: 6, TE: 2, K: 1, DEF: 1 }
-    return (counts[pos] || 0) < (caps[pos] ?? 2)
+  const picksLeft = TOTAL_ROUNDS - teamPicks.length
+  const avail = players.filter(p => !draftedSet.has(p.id))
+  const bestAt = pos =>
+    avail.find(p => p.position === pos && p.adp != null) ||
+    avail.find(p => p.position === pos)
+
+  // Required starters still unfilled (1 QB, 2 RB, 2 WR, 1 TE, 1 K, 1 DEF)
+  const reqGaps = []
+  ;[['QB', 1], ['RB', 2], ['WR', 2], ['TE', 1], ['K', 1], ['DEF', 1]].forEach(([pos, n]) => {
+    for (let i = counts[pos] || 0; i < n; i++) reqGaps.push(pos)
+  })
+
+  // URGENT: remaining picks barely cover required slots — fill them now
+  if (reqGaps.length >= picksLeft && reqGaps.length > 0) {
+    const order = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
+    for (const pos of order) {
+      if (reqGaps.includes(pos)) {
+        const pick = bestAt(pos)
+        if (pick) return pick
+      }
+    }
   }
-  const avail = players.filter(p => !draftedSet.has(p.id) && p.adp != null)
-  const preferred = avail.find(p => need(p.position))
-  return preferred || avail[0] || players.find(p => !draftedSet.has(p.id))
+
+  // Otherwise: best available within positional caps (never 3 QBs before a K)
+  const caps = { QB: 2, RB: 6, WR: 6, TE: 2, K: 1, DEF: 1 }
+  const need = pos => (counts[pos] || 0) < (caps[pos] ?? 2)
+  const ranked = avail.filter(p => p.adp != null)
+  return ranked.find(p => need(p.position)) ||
+    avail.find(p => need(p.position)) ||
+    ranked[0] || avail[0]
 }
 
 function autoAssignSlots(teamPlayers) {
@@ -471,6 +493,9 @@ export default function App() {
     setRealTeam(real); setRealLeague(real?.leagues || null)
     setMockTeam(mock); setMockLeague(mock?.leagues || null)
     if (!mock && view === 'mock') setView('home')
+    // A mock draft mid-flight needs this (admin) client driving the bots —
+    // route straight back into it after any refresh so it never silently stalls.
+    if (mock?.leagues?.status === 'drafting') setView('mock')
   }, [session]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadMyLeagues() }, [loadMyLeagues])
@@ -913,7 +938,11 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
             : p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim(),
           position: p.position,
           nfl_team: p.team || null,
-          adp: typeof p.search_rank === 'number' && p.search_rank < 9999999 ? p.search_rank : null,
+          // DEF entries have no search_rank — give them a synthetic rank so
+          // they sort (bottom of board) and are draftable by autopick/bots.
+          adp: p.position === 'DEF'
+            ? 7000
+            : (typeof p.search_rank === 'number' && p.search_rank < 9999999 ? p.search_rank : null),
           status: p.injury_status || (p.active ? 'active' : 'inactive'),
         }))
       const CHUNK = 500
@@ -1260,7 +1289,13 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   const [posFilter, setPosFilter] = useState('ALL')
   const [now, setNow] = useState(Date.now())
   const [busyPick, setBusyPick] = useState(false)
-  const [fastBots, setFastBots] = useState(false) // mock-only: bots pick every 200ms
+  const [fastBots, setFastBotsState] = useState(() => {
+    try { return localStorage.getItem('bolff_fast_bots') === '1' } catch { return false }
+  }) // mock-only: bots pick every 200ms; remembered across refreshes
+  const setFastBots = (v) => {
+    setFastBotsState(v)
+    try { localStorage.setItem('bolff_fast_bots', v ? '1' : '0') } catch { /* ignore */ }
+  }
   const firedForPick = useRef({ pick: -1, at: 0 }) // guards duplicate autopick/bot fires per pick number
 
   const numTeams = league.draft_order?.length || teams.length
@@ -1279,9 +1314,20 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   // ---- data loads ----
   useEffect(() => {
     let mounted = true
-    supabase.from('players').select('*').order('adp', { ascending: true, nullsFirst: false })
-      .limit(5000)
-      .then(({ data }) => { if (mounted) setPlayers(data || []) })
+    ;(async () => {
+      // Page through ALL players (Supabase caps responses at 1,000 rows)
+      const all = []
+      for (let from = 0; ; from += 1000) {
+        const { data } = await supabase.from('players').select('*')
+          .order('adp', { ascending: true, nullsFirst: false })
+          .order('id', { ascending: true })
+          .range(from, from + 999)
+        if (!data || data.length === 0) break
+        all.push(...data)
+        if (data.length < 1000) break
+      }
+      if (mounted) setPlayers(all)
+    })()
     return () => { mounted = false }
   }, [])
 
@@ -1833,10 +1879,11 @@ function DraftAdvisor({ myPicks, players, draftedSet, picksRemaining }) {
   const distinctNeeds = [...new Set(missing.map(m => m === 'FLEX' ? null : m).filter(Boolean))]
 
   // Best available: at needed positions first, otherwise overall
-  const avail = players.filter(p => !draftedSet.has(p.id) && p.adp != null)
+  const availAll = players.filter(p => !draftedSet.has(p.id))
+  const avail = availAll.filter(p => p.adp != null)
   const suggestions = []
   distinctNeeds.slice(0, 3).forEach(pos => {
-    const best = avail.find(p => p.position === pos)
+    const best = avail.find(p => p.position === pos) || availAll.find(p => p.position === pos)
     if (best) suggestions.push({ ...best, why: `fills ${pos}` })
   })
   if (suggestions.length < 3) {
