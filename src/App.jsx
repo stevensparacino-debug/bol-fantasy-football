@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v4.2' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v4.4' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -316,7 +316,8 @@ function bestAvailable(players, draftedSet, teamPicks) {
   const counts = {}
   teamPicks.forEach(p => { counts[p.position] = (counts[p.position] || 0) + 1 })
   const picksLeft = TOTAL_ROUNDS - teamPicks.length
-  const avail = players.filter(p => !draftedSet.has(p.id))
+  const avail = players.filter(p =>
+    !draftedSet.has(p.id) && (p.nfl_team != null || p.adp != null))
   const bestAt = pos =>
     avail.find(p => p.position === pos && p.adp != null) ||
     avail.find(p => p.position === pos)
@@ -449,6 +450,72 @@ function scaleStats(s, f) {
     out[k] = typeof v === 'number' ? v * f : v
   })
   return out
+}
+
+// Load every player row (paginated past the 1,000-row cap)
+async function loadAllPlayers() {
+  const all = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase.from('players').select('*')
+      .order('adp', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true })
+      .range(from, from + 999)
+    if (!data || data.length === 0) break
+    all.push(...data)
+    if (data.length < 1000) break
+  }
+  return all
+}
+
+// Auto-complete an entire draft (mock testing): fills every remaining pick
+// with the same bestAvailable logic autopick uses, then activates the league.
+async function runInstantDraft(league, teams) {
+  let order = league.draft_order
+  if (!order || order.length === 0) {
+    order = teams.map(t => t.id)
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[order[i], order[j]] = [order[j], order[i]]
+    }
+    const { error } = await supabase.from('leagues')
+      .update({ draft_order: order }).eq('id', league.id)
+    if (error) throw error
+  }
+  const players = await loadAllPlayers()
+  const pById = Object.fromEntries(players.map(p => [p.id, p]))
+  const { data: existing, error: exErr } = await supabase
+    .from('draft_picks').select('*').eq('league_id', league.id)
+  if (exErr) throw exErr
+  const drafted = new Set((existing || []).map(p => p.player_id))
+  const byTeam = {}
+  ;(existing || []).forEach(p => {
+    const pl = pById[p.player_id]
+    if (pl) (byTeam[p.team_id] = byTeam[p.team_id] || []).push(pl)
+  })
+  const numTeams = order.length
+  const total = TOTAL_ROUNDS * numTeams
+  const rows = []
+  for (let n = (existing || []).length; n < total; n++) {
+    const teamId = order[slotForPick(n, numTeams)]
+    const teamPicks = byTeam[teamId] = byTeam[teamId] || []
+    const choice = bestAvailable(players, drafted, teamPicks)
+    if (!choice) break
+    drafted.add(choice.id)
+    teamPicks.push(choice)
+    rows.push({
+      league_id: league.id, team_id: teamId, player_id: choice.id,
+      round: Math.floor(n / numTeams) + 1, pick_number: n + 1,
+    })
+  }
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await supabase.from('draft_picks').insert(rows.slice(i, i + 200))
+    if (error) throw error
+  }
+  const { error: upErr } = await supabase.from('leagues').update({
+    current_pick: total, status: 'active', pick_deadline: null, paused: false,
+  }).eq('id', league.id)
+  if (upErr) throw upErr
+  return rows.length
 }
 
 // ============================================================
@@ -930,7 +997,12 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       if (!res.ok) throw new Error(`Sleeper API returned ${res.status}`)
       const all = await res.json()
       const rows = Object.values(all)
-        .filter(p => FANTASY_POSITIONS.includes(p.position) && (p.position === 'DEF' || p.active === true))
+        .filter(p =>
+          FANTASY_POSITIONS.includes(p.position) &&
+          (p.position === 'DEF' ||
+            (p.active === true &&
+              (p.team != null ||
+                (typeof p.search_rank === 'number' && p.search_rank < 9999999)))))
         .map(p => ({
           id: String(p.player_id),
           name: p.position === 'DEF'
@@ -1192,6 +1264,20 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
         <button className="btn btn-primary" disabled={busy || !canStart} onClick={startDraft}>
           Start draft ({teams.length}/{MAX_TEAMS} teams)
         </button>
+        {isMock && league.status !== 'active' && (
+          <button className="btn btn-mock" disabled={busy} onClick={async () => {
+            setBusy(true)
+            try {
+              const n = await runInstantDraft(league, teams)
+              setMockMsg({ t: 'ok', v: `⚡ Instant draft complete — ${n} picks made. Rosters are being written.` })
+            } catch (err) {
+              setMockMsg({ t: 'err', v: `Instant draft failed: ${err.message}` })
+            }
+            setBusy(false)
+          }}>
+            ⚡ Instant draft (skip to finished)
+          </button>
+        )}
         {isMock && (
           <button className="btn" disabled={busy} onClick={resetMock}>Reset mock (delete + start over)</button>
         )}
@@ -1443,6 +1529,9 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     const q = search.trim().toLowerCase()
     return players
       .filter(p => !draftedSet.has(p.id))
+      // Sleeper's 'active' flag is unreliable for retirees — a real draftable
+      // player has an NFL team and/or a draft rank. Ghosts have neither.
+      .filter(p => p.nfl_team != null || p.adp != null)
       .filter(p => posFilter === 'ALL' || p.position === posFilter)
       .filter(p => !q || p.name.toLowerCase().includes(q))
       .slice(0, 120)
@@ -1465,6 +1554,16 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
             <input type="checkbox" checked={fastBots} onChange={e => setFastBots(e.target.checked)} />
             Fast-forward bots
           </label>
+          {isLeagueAdmin && (
+            <button className="btn btn-xs" disabled={busyPick} onClick={async () => {
+              if (!window.confirm('Auto-complete every remaining pick and finish the draft?')) return
+              setBusyPick(true)
+              try { await runInstantDraft(league, teams) } catch (e) { console.error(e) }
+              setBusyPick(false)
+            }}>
+              ⚡ Finish draft instantly
+            </button>
+          )}
         </div>
       )}
 
@@ -1879,7 +1978,8 @@ function DraftAdvisor({ myPicks, players, draftedSet, picksRemaining }) {
   const distinctNeeds = [...new Set(missing.map(m => m === 'FLEX' ? null : m).filter(Boolean))]
 
   // Best available: at needed positions first, otherwise overall
-  const availAll = players.filter(p => !draftedSet.has(p.id))
+  const availAll = players.filter(p =>
+    !draftedSet.has(p.id) && (p.nfl_team != null || p.adp != null))
   const avail = availAll.filter(p => p.adp != null)
   const suggestions = []
   distinctNeeds.slice(0, 3).forEach(pos => {
