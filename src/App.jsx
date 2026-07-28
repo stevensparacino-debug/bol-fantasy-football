@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v7.1' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v7.2' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -560,6 +560,24 @@ select.input { appearance: none; }
 .fp-head b { font-size: 13px; }
 .fp-meta { font-size: 10px; color: var(--faint); letter-spacing: 0.08em; }
 .fp-body { font-size: 13px; margin-top: 4px; color: var(--text); line-height: 1.45; }
+
+/* ---------- Kit: draft countdown ---------- */
+.cd-grid { display: flex; gap: 10px; margin-top: 6px; }
+.cd-cell {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px 8px;
+}
+.cd-num {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  font-size: clamp(32px, 8vw, 52px); line-height: 1; color: var(--orange);
+  font-variant-numeric: tabular-nums;
+}
+.cd-tbd { font-size: 14px; color: var(--muted); }
+.cd-live {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 22px; color: var(--lime);
+}
 
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
@@ -1226,6 +1244,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   const isLeagueAdmin = isAdmin || league.admin_id === session.user.id
   const drafting = league.status === 'drafting'
   const active = league.status === 'active'
+  const preDraft = league.status === 'setup' || league.status === 'locked'
 
   return (
     <>
@@ -1235,7 +1254,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         </div>
       )}
 
-      {active && (
+      {(active || preDraft) && (
         <div className="tabs top-tabs">
           <button className={`tab ${tab === 'home' ? 'on' : ''}`} onClick={() => setTab('home')}>League</button>
           <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>Team</button>
@@ -1246,7 +1265,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         </div>
       )}
 
-      {active && (
+      {(active || preDraft) && (
         <nav className="bottom-nav">
           {[
             ['home', 'League'], ['team', 'Team'], ['scores', 'Matchup'],
@@ -1291,8 +1310,10 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         />
       ) : active && tab === 'standings' ? (
         <Standings league={league} teams={teams} myTeamId={myTeamId} isLeagueAdmin={isLeagueAdmin} />
-      ) : active && tab === 'feed' ? (
+      ) : (active || preDraft) && tab === 'feed' ? (
         <FeedScreen league={league} teams={teams} myTeamId={myTeamId} session={session} />
+      ) : preDraft && tab !== 'home' ? (
+        <ComingSoon tab={tab} league={league} onHome={() => setTab('home')} />
       ) : (
         <LeagueHome
           league={league}
@@ -1319,6 +1340,9 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
     <>
       {league.status === 'active' && (
         <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} onStandings={() => setTab && setTab('standings')} />
+      )}
+      {(league.status === 'setup' || league.status === 'locked') && !isMock && (
+        <DraftCountdown league={league} teams={teams} />
       )}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -1350,6 +1374,10 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
         {league.status === 'active' && <TransactionsFeed league={league} />}
       </div>
 
+      {(league.status === 'setup' || league.status === 'locked') && !isMock && (
+        <PreDraftCoach league={league} teams={teams} myTeamId={myTeamId} />
+      )}
+
       {isLeagueAdmin && (
         <AdminPanel
           league={league}
@@ -1379,6 +1407,22 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     supabase.from('players').select('id', { count: 'exact', head: true })
       .then(({ count }) => setPlayerCount(count ?? 0))
   }, [seeding])
+
+  const [draftAtInput, setDraftAtInput] = useState(() => {
+    if (!league.draft_at) return ''
+    const d = new Date(league.draft_at)
+    const pad = n => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  })
+  const saveDraftAt = async () => {
+    if (!draftAtInput) return
+    await supabase.from('leagues')
+      .update({ draft_at: new Date(draftAtInput).toISOString() }).eq('id', league.id)
+  }
+  const clearDraftAt = async () => {
+    await supabase.from('leagues').update({ draft_at: null }).eq('id', league.id)
+    setDraftAtInput('')
+  }
 
   const toggleLock = async () => {
     setBusy(true)
@@ -1686,6 +1730,23 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
             <button className="btn" disabled={busy} onClick={toggleLock}>
               {league.status === 'setup' ? 'Lock league (close joins)' : 'Unlock league (reopen joins)'}
             </button>
+            {(league.status === 'setup' || league.status === 'locked') && (
+              <>
+                <input
+                  className="input" type="datetime-local"
+                  style={{ maxWidth: 210, flex: 'none', padding: '8px 10px' }}
+                  value={draftAtInput}
+                  onChange={e => setDraftAtInput(e.target.value)}
+                  aria-label="Draft date and time"
+                />
+                <button className="btn" disabled={busy || !draftAtInput} onClick={saveDraftAt}>
+                  Set draft day
+                </button>
+                {league.draft_at && (
+                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={clearDraftAt}>Clear date</button>
+                )}
+              </>
+            )}
           </>
         )}
         <button className="btn" disabled={busy || (!isMock && league.status === 'setup')} onClick={randomizeOrder}>
@@ -3995,4 +4056,109 @@ function FeedScreen({ league, teams, myTeamId, session }) {
       ))}
     </div>
   )
+}
+
+// ============================================================
+// DRAFT COUNTDOWN — pre-draft hero with live ticking clock
+// ============================================================
+function DraftCountdown({ league, teams }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  const at = league.draft_at ? new Date(league.draft_at).getTime() : null
+  const diff = at ? at - now : null
+  const past = diff != null && diff <= 0
+  const d = diff != null && !past ? Math.floor(diff / 86400000) : 0
+  const h = diff != null && !past ? Math.floor((diff % 86400000) / 3600000) : 0
+  const m = diff != null && !past ? Math.floor((diff % 3600000) / 60000) : 0
+  const s = diff != null && !past ? Math.floor((diff % 60000) / 1000) : 0
+  const pad = n => String(n).padStart(2, '0')
+
+  return (
+    <div className="card hero-card countdown-card">
+      <div className="hero-top">
+        <span className="adv-label" style={{ margin: 0 }}>Draft day</span>
+        <span className="dt-sub">{teams.length} of {MAX_TEAMS} teams in</span>
+      </div>
+      {!at ? (
+        <p className="cd-tbd">Date TBD — the commissioner will set it. Get your rankings ready.</p>
+      ) : past ? (
+        <p className="cd-live">IT'S DRAFT DAY. The commissioner will open the draft room shortly.</p>
+      ) : (
+        <>
+          <div className="cd-grid">
+            <div className="cd-cell"><span className="cd-num">{d}</span><span className="dt-label">Days</span></div>
+            <div className="cd-cell"><span className="cd-num">{pad(h)}</span><span className="dt-label">Hrs</span></div>
+            <div className="cd-cell"><span className="cd-num">{pad(m)}</span><span className="dt-label">Min</span></div>
+            <div className="cd-cell"><span className="cd-num">{pad(s)}</span><span className="dt-label">Sec</span></div>
+          </div>
+          <p className="dt-sub" style={{ marginTop: 10 }}>
+            {new Date(at).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            {' '}· Snake · 16 rounds · 90s clock · Half-PPR
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// COMING SOON — pre-draft placeholder for locked tabs
+// ============================================================
+function ComingSoon({ tab, league, onHome }) {
+  const copy = {
+    team: ['Your team', 'Your roster lives here once the draft is done — starters, bench, projections, and weekly lineup moves.'],
+    scores: ['Matchups', 'Head-to-head scoreboards with live Sunday scoring appear here every week of the season.'],
+    players: ['Free agents', 'The waiver wire opens after the draft — add and drop players all season long.'],
+    standings: ['Standings', 'Records, points for and against, streaks, and the playoff picture — starting week 1.'],
+  }
+  const [title, body] = copy[tab] || ['Coming soon', 'This unlocks after the draft.']
+  return (
+    <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+      <h2>{title}</h2>
+      <p className="sub" style={{ maxWidth: 420, margin: '0 auto 8px' }}>{body}</p>
+      <p className="sub" style={{ marginBottom: 20 }}>
+        <b style={{ color: 'var(--orange)' }}>Unlocks after the draft{league.draft_at ? ` — ${new Date(league.draft_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}` : ''}.</b>
+      </p>
+      <button className="btn btn-sm" onClick={onHome}>Back to league</button>
+    </div>
+  )
+}
+
+// ============================================================
+// PRE-DRAFT COACH — talk strategy with Coach Sunday before draft day
+// ============================================================
+function PreDraftCoach({ league, teams, myTeamId }) {
+  const [topPlayers, setTopPlayers] = useState([])
+
+  useEffect(() => {
+    let mounted = true
+    supabase.from('players').select('name, position, nfl_team, adp, last_season_avg')
+      .not('adp', 'is', null)
+      .order('adp', { ascending: true })
+      .limit(20)
+      .then(({ data }) => { if (mounted) setTopPlayers(data || []) })
+    return () => { mounted = false }
+  }, [])
+
+  const buildContext = () => {
+    const at = league.draft_at ? new Date(league.draft_at) : null
+    const days = at ? Math.max(0, Math.ceil((at.getTime() - Date.now()) / 86400000)) : null
+    const myTeam = teams.find(t => t.id === myTeamId)
+    const board = topPlayers.map((p, i) =>
+      `${i + 1}. ${p.name} (${p.position} ${p.nfl_team || 'FA'}` +
+      `${p.last_season_avg != null ? `, 2025 avg ${p.last_season_avg}` : ''})`
+    ).join('\n')
+    return `PRE-DRAFT MODE — no live pick is happening. This is draft-prep talk.\n` +
+      `The league draft ${at ? `is ${days === 0 ? 'TODAY' : `in ${days} day${days === 1 ? '' : 's'}`} (${at.toLocaleDateString()})` : 'date is not set yet'}.\n` +
+      `${teams.length} of ${MAX_TEAMS} teams have joined. The manager's team: ${myTeam?.team_name || 'unnamed'}.\n` +
+      `Format: 12-team snake, 16 rounds, 90-second clock, half-PPR.\n\n` +
+      `TOP OF THE 2026 DRAFT BOARD (by rank, with 2025 avg points/game):\n${board}\n\n` +
+      `The manager wants draft strategy, rankings talk, or hype for draft day. Keep it fun and grounded in the board above.`
+  }
+
+  return <CoachCard buildContext={buildContext} />
 }
