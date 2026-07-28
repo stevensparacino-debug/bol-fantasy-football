@@ -5,6 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
+const BUILD = 'v2.3' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 const APP_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/'
@@ -357,7 +358,7 @@ export default function App() {
         )}
       </div>
 
-      <div className="footer">BOL Agency · {CURRENT_SEASON} Season</div>
+      <div className="footer">BOL Agency · {CURRENT_SEASON} Season · {BUILD}</div>
     </div>
   )
 }
@@ -691,7 +692,11 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       statPairs.forEach(([pid, s]) => {
         const pts = s?.pts_std
         if (pid && typeof pts === 'number' && pts !== 0) {
-          ptsById.set(pid, Math.round(pts * 10) / 10)
+          const gp = typeof s?.gp === 'number' && s.gp > 0 ? s.gp : null
+          ptsById.set(pid, {
+            pts: Math.round(pts * 10) / 10,
+            avg: gp ? Math.round((pts / gp) * 10) / 10 : null,
+          })
         }
       })
       if (ptsById.size === 0) throw new Error('No usable 2025 stats found in the response.')
@@ -708,7 +713,11 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
 
       const rows = allIds
         .filter(id => ptsById.has(id))
-        .map(id => ({ id, last_season_pts: ptsById.get(id) }))
+        .map(id => ({
+          id,
+          last_season_pts: ptsById.get(id).pts,
+          last_season_avg: ptsById.get(id).avg,
+        }))
       setSeedMsg({ t: 'ok', v: `Updating ${rows.length} players with 2025 points…` })
 
       for (let i = 0; i < rows.length; i += 500) {
@@ -1100,7 +1109,10 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
               <div key={p.id} className="pool-row">
                 <span className="pname">{p.name}</span>
                 <span className="pmeta">{p.position} · {p.nfl_team || 'FA'}</span>
-                <span className="prank" title="2025 fantasy points (standard)">
+                <span className="prank" title="2025 avg points/game">
+                  {p.last_season_avg != null ? `${p.last_season_avg} avg` : '—'}
+                </span>
+                <span className="prank" title="2025 total fantasy points (standard)">
                   {p.last_season_pts != null ? `${p.last_season_pts} pts` : '—'}
                 </span>
                 <span className="prank">#{p.adp ?? '—'}</span>
