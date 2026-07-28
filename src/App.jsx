@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v6.0' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v6.1' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -67,6 +67,10 @@ const CSS = `
   --magenta: #DC2BDC;
   --red: #FF5A5A;
   --yellow: #EEFF41;
+  --orange-soft: #FFB49C;
+  --magenta-soft: #F2A9F2;
+  --red-soft: #FFB1B1;
+  --on-accent: #0E121A;
   /* legacy aliases used by inline styles */
   --ink: #E7E7E9;
   --cream: #0E121A;
@@ -75,11 +79,38 @@ const CSS = `
   --mock: #DC2BDC;
   --orange-dark: #F85E32;
 }
+[data-theme="light"] {
+  --bg: #F5F6F8;
+  --surface: #FFFFFF;
+  --card: #FFFFFF;
+  --raise: #E4E7EE;
+  --text: #1B2130;
+  --muted: #5D6577;
+  --faint: #8B8F9C;
+  --line: rgba(27,33,48,0.12);
+  --line-strong: rgba(27,33,48,0.28);
+  --orange: #E04B1D;
+  --cyan: #0B8CA8;
+  --lime: #5E9C0F;
+  --magenta: #B21CB2;
+  --red: #D53030;
+  --yellow: #A38F00;
+  --orange-soft: #9A3412;
+  --magenta-soft: #8E1B8E;
+  --red-soft: #B3261E;
+  --on-accent: #FFFFFF;
+  --ink: #1B2130;
+  --cream: #F5F6F8;
+  --chalk: #FFFFFF;
+  --turf: #5E9C0F;
+  --mock: #B21CB2;
+  --orange-dark: #C23E14;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { background: var(--bg); color: var(--text); }
 body { font-family: 'Archivo', sans-serif; -webkit-font-smoothing: antialiased; }
 .app { min-height: 100vh; display: flex; flex-direction: column; }
-::selection { background: var(--orange); color: var(--bg); }
+::selection { background: var(--orange); color: var(--on-accent); }
 
 .display {
   font-family: 'Archivo Narrow', 'Archivo', sans-serif;
@@ -121,10 +152,10 @@ body { font-family: 'Archivo', sans-serif; -webkit-font-smoothing: antialiased; 
 .btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn:disabled:hover { border-color: var(--line-strong); color: var(--text); }
 .btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-.btn-primary { background: var(--orange); border-color: var(--orange); color: var(--bg); }
-.btn-primary:hover { background: #FF7550; border-color: #FF7550; color: var(--bg); }
-.btn-turf { background: var(--lime); border-color: var(--lime); color: var(--bg); }
-.btn-turf:hover { background: #C6FF5E; border-color: #C6FF5E; color: var(--bg); }
+.btn-primary { background: var(--orange); border-color: var(--orange); color: var(--on-accent); }
+.btn-primary:hover { filter: brightness(1.1); color: var(--on-accent); }
+.btn-turf { background: var(--lime); border-color: var(--lime); color: var(--on-accent); }
+.btn-turf:hover { filter: brightness(1.1); color: var(--on-accent); }
 .btn-mock { background: var(--magenta); border-color: var(--magenta); color: #fff; }
 .btn-mock:hover { background: #EE4BEE; border-color: #EE4BEE; color: #fff; }
 .btn-sm { padding: 8px 14px; font-size: 12px; }
@@ -164,7 +195,7 @@ select.input { appearance: none; }
   display: inline-flex; align-items: center;
   font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
   font-size: 28px; letter-spacing: 0.25em;
-  background: var(--orange); color: var(--bg); padding: 8px 16px 8px 20px; border-radius: 6px;
+  background: var(--orange); color: var(--on-accent); padding: 8px 16px 8px 20px; border-radius: 6px;
 }
 
 /* Teams grid */
@@ -191,10 +222,10 @@ select.input { appearance: none; }
   display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.14em; padding: 4px 10px; border-radius: 999px;
 }
-.pill.setup { background: var(--yellow); color: var(--bg); }
-.pill.locked { background: var(--orange); color: var(--bg); }
-.pill.drafting { background: var(--cyan); color: var(--bg); }
-.pill.active { background: var(--lime); color: var(--bg); }
+.pill.setup { background: var(--yellow); color: var(--on-accent); }
+.pill.locked { background: var(--orange); color: var(--on-accent); }
+.pill.drafting { background: var(--cyan); color: var(--on-accent); }
+.pill.active { background: var(--lime); color: var(--on-accent); }
 .pill.mock { background: var(--magenta); color: #fff; }
 
 .admin-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
@@ -214,11 +245,11 @@ select.input { appearance: none; }
   background: transparent; color: var(--muted); cursor: pointer;
 }
 .tab:hover { color: var(--text); border-color: var(--text); }
-.tab.on { background: var(--orange); border-color: var(--orange); color: var(--bg); }
+.tab.on { background: var(--orange); border-color: var(--orange); color: var(--on-accent); }
 
 /* Mock banner */
 .mock-banner {
-  background: rgba(220,43,220,0.14); border: 1px solid var(--magenta); color: #F2A9F2;
+  background: rgba(220,43,220,0.14); border: 1px solid var(--magenta); color: var(--magenta-soft);
   text-align: center; font-weight: 600; font-size: 12px; letter-spacing: 0.04em;
   padding: 9px 16px; border-radius: 8px; margin-bottom: 16px;
 }
@@ -256,7 +287,7 @@ select.input { appearance: none; }
   border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer;
 }
 .chip:hover { color: var(--text); border-color: var(--text); }
-.chip.on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.chip.on { background: var(--text); border-color: var(--text); color: var(--surface); }
 
 .pool { max-height: 520px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .pool-row {
@@ -332,7 +363,7 @@ select.input { appearance: none; }
 .lock-banner {
   margin-top: 12px; padding: 10px 14px; border-radius: 6px;
   background: rgba(248,94,50,0.14); border: 1px solid var(--orange);
-  color: #FFB49C; font-weight: 600; font-size: 13px;
+  color: var(--orange-soft); font-weight: 600; font-size: 13px;
 }
 
 /* Draft advisor */
@@ -377,7 +408,7 @@ select.input { appearance: none; }
 .mu-vs { font-size: 10px; color: var(--faint); }
 .mu-final {
   font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
-  background: var(--lime); color: var(--bg); padding: 3px 7px; border-radius: 4px;
+  background: var(--lime); color: var(--on-accent); padding: 3px 7px; border-radius: 4px;
 }
 
 /* Trades / transactions */
@@ -656,6 +687,15 @@ export default function App() {
   const [mockTeam, setMockTeam] = useState(null)
   const [mockLeague, setMockLeague] = useState(null)
   const [view, setView] = useState('home') // 'home' | 'mock'
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('bolff_theme') || 'dark' } catch { return 'dark' }
+  })
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try { localStorage.setItem('bolff_theme', theme) } catch { /* ignore */ }
+  }, [theme])
+  const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'))
 
   useEffect(() => {
     const tag = document.createElement('style')
@@ -715,6 +755,10 @@ export default function App() {
         <header className="header">
           <div className="display logo">BOL <span>FANTASY</span> FOOTBALL</div>
           <div className="user">
+            <button className="btn btn-sm btn-ghost" onClick={toggleTheme}
+              title="Toggle light/dark" aria-label="Toggle light/dark mode">
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
             {mockLeague && (
               <button className="btn btn-sm btn-ghost" onClick={() => setView(view === 'mock' ? 'home' : 'mock')}>
                 {view === 'mock' ? '← Back to league' : 'Mock draft →'}
@@ -727,7 +771,16 @@ export default function App() {
       )}
 
       <div className="main">
-        {!session && <LoginScreen onLogin={handleLogin} />}
+        {!session && (
+          <>
+            <button className="btn btn-sm btn-ghost" onClick={toggleTheme}
+              style={{ position: 'fixed', top: 14, right: 16, zIndex: 30 }}
+              title="Toggle light/dark" aria-label="Toggle light/dark mode">
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            <LoginScreen onLogin={handleLogin} />
+          </>
+        )}
 
         {session && view === 'mock' && mockLeague && (
           <LeagueView
@@ -2162,7 +2215,7 @@ function TeamPage({ league, teams, myTeamId, isLeagueAdmin }) {
           const p = playersById[r.player_id]
           return p && !slotAccepts(p.position, r.slot)
         }) && (
-          <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: '#FFB1B1' }}>
+          <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: 'var(--red-soft)' }}>
             Illegal lineup — a player is in a slot their position doesn't allow
             (this can happen after a trade or add). Tap-swap to fix it before kickoff.
           </div>
@@ -2483,7 +2536,7 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
         </div>
 
         {Object.keys(stats).length === 0 && lastFetch && (
-          <div className="lock-banner" style={{ background: 'rgba(220,43,220,0.14)', borderColor: 'var(--magenta)', color: '#F2A9F2' }}>
+          <div className="lock-banner" style={{ background: 'rgba(220,43,220,0.14)', borderColor: 'var(--magenta)', color: 'var(--magenta-soft)' }}>
             No stats exist for {statsYear} week {statsWeek} — {statsYear >= CURRENT_SEASON
               ? 'that week hasn\u2019t been played yet. Set a 2025 mock week in Commissioner Controls to test with real data.'
               : 'check the week number.'}
