@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v3.3' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v4.0' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -258,6 +258,20 @@ body { font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; 
   font-size: 13px; line-height: 1.5; white-space: pre-wrap;
 }
 
+/* ---------- Scoreboard ---------- */
+.mu-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 2px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+  background: var(--chalk); font-size: 14px;
+}
+.mu-row.mine { border-color: var(--orange); background: #FDEBDD; }
+.mu-team { font-weight: 700; flex: 1; }
+.mu-team.away { text-align: right; }
+.mu-team.lead { color: var(--turf); }
+.mu-score { font-family: 'Bebas Neue', sans-serif; font-size: 22px; min-width: 58px; text-align: center; }
+.mu-vs { font-size: 11px; opacity: 0.5; }
+.mu-final { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; background: var(--ink); color: var(--cream); padding: 3px 7px; border-radius: 4px; }
+
 @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 `
 
@@ -332,6 +346,85 @@ function autoAssignSlots(teamPlayers) {
     if (!used.has(p.id) && bn < BENCH_SLOTS.length) {
       used.add(p.id); out.push({ player_id: p.id, slot: BENCH_SLOTS[bn++] })
     }
+  })
+  return out
+}
+
+// Compute fantasy points for one player's stat line (half-PPR + DEF tiers)
+function fantasyPoints(s, position) {
+  if (!s) return 0
+  let pts = 0
+  pts += (s.pass_yd || 0) * SCORING.pass_yd
+  pts += (s.pass_td || 0) * SCORING.pass_td
+  pts += (s.pass_int || 0) * SCORING.pass_int
+  pts += (s.rush_yd || 0) * SCORING.rush_yd
+  pts += (s.rush_td || 0) * SCORING.rush_td
+  pts += (s.rec || 0) * SCORING.rec
+  pts += (s.rec_yd || 0) * SCORING.rec_yd
+  pts += (s.rec_td || 0) * SCORING.rec_td
+  pts += (s.fum_lost || 0) * SCORING.fum_lost
+  pts += ((s.pass_2pt || 0) + (s.rush_2pt || 0) + (s.rec_2pt || 0)) * SCORING.two_pt
+  // Kickers
+  pts += ((s.fgm_0_19 || 0) + (s.fgm_20_29 || 0) + (s.fgm_30_39 || 0)) * SCORING.fg_0_39
+  pts += (s.fgm_40_49 || 0) * SCORING.fg_40_49
+  pts += (s.fgm_50p || 0) * SCORING.fg_50p
+  pts += (s.xpm || 0) * SCORING.xp
+  // Team defense
+  if (position === 'DEF') {
+    pts += (s.def_td || 0) * SCORING.def_td
+    pts += (s.sack || 0) * SCORING.def_sack
+    pts += (s.int || 0) * SCORING.def_int
+    pts += (s.fum_rec || 0) * SCORING.def_fum_rec
+    pts += (s.safe || 0) * SCORING.def_safety
+    const pa = s.pts_allow
+    if (typeof pa === 'number') {
+      for (const [lo, hi, tier] of SCORING.def_pa_tiers) {
+        if (pa >= lo && pa <= hi) { pts += tier; break }
+      }
+    }
+  }
+  return Math.round(pts * 100) / 100
+}
+
+// Round-robin schedule: every team plays every week, opponents rotate.
+// 12 teams -> 11 unique rounds; weeks 12-13 repeat rounds 1-2.
+function roundRobin(teamIds, weeks) {
+  const arr = [...teamIds]
+  if (arr.length % 2 !== 0) arr.push(null)
+  const n = arr.length
+  const rounds = []
+  for (let r = 0; r < n - 1; r++) {
+    const pairs = []
+    for (let i = 0; i < n / 2; i++) {
+      const a = arr[i], b = arr[n - 1 - i]
+      if (a != null && b != null) pairs.push([a, b])
+    }
+    rounds.push(pairs)
+    arr.splice(1, 0, arr.pop())
+  }
+  const schedule = []
+  for (let w = 1; w <= weeks; w++) {
+    schedule.push({ week: w, pairs: rounds[(w - 1) % rounds.length] })
+  }
+  return schedule
+}
+
+// Normalize a Sleeper stats/projections response (object or array) into { id -> stats }
+function normalizeSleeperStats(raw) {
+  const pairs = Array.isArray(raw)
+    ? raw.map(r => [String(r.player_id ?? r.player?.player_id ?? ''), r.stats ?? r])
+    : Object.entries(raw).map(([pid, s]) => [String(pid), s])
+  const map = {}
+  pairs.forEach(([pid, s]) => { if (pid && s && typeof s === 'object') map[pid] = s })
+  return map
+}
+
+// Scale a stat line by fraction f (0..1) - used by simulated-live replay
+function scaleStats(s, f) {
+  if (!s || f >= 1) return s
+  const out = {}
+  Object.entries(s).forEach(([k, v]) => {
+    out[k] = typeof v === 'number' ? v * f : v
   })
   return out
 }
@@ -659,6 +752,8 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         <div className="tabs">
           <button className={`tab ${tab === 'home' ? 'on' : ''}`} onClick={() => setTab('home')}>League</button>
           <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>My Team</button>
+          <button className={`tab ${tab === 'scores' ? 'on' : ''}`} onClick={() => setTab('scores')}>Scoreboard</button>
+          <button className={`tab ${tab === 'standings' ? 'on' : ''}`} onClick={() => setTab('standings')}>Standings</button>
         </div>
       )}
 
@@ -678,6 +773,15 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           myTeamId={myTeamId}
           isLeagueAdmin={isLeagueAdmin}
         />
+      ) : active && tab === 'scores' ? (
+        <Scoreboard
+          league={league}
+          teams={teams}
+          myTeamId={myTeamId}
+          isLeagueAdmin={isLeagueAdmin}
+        />
+      ) : active && tab === 'standings' ? (
+        <Standings league={league} teams={teams} myTeamId={myTeamId} />
       ) : (
         <LeagueHome
           league={league}
@@ -990,6 +1094,40 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     setBusy(false)
   }
 
+  const [scheduleMsg, setScheduleMsg] = useState(null)
+  const [mockWeekInput, setMockWeekInput] = useState('5')
+
+  const generateSchedule = async () => {
+    setBusy(true)
+    try {
+      const { count } = await supabase
+        .from('matchups').select('id', { count: 'exact', head: true })
+        .eq('league_id', league.id)
+      if ((count || 0) > 0) {
+        setScheduleMsg({ t: 'err', v: 'Schedule already exists. Delete matchups in Supabase to regenerate.' })
+      } else {
+        const schedule = roundRobin(teams.map(t => t.id), 13)
+        const rows = []
+        schedule.forEach(({ week, pairs }) => {
+          pairs.forEach(([home, away]) => {
+            rows.push({ league_id: league.id, week, home_team_id: home, away_team_id: away })
+          })
+        })
+        const { error } = await supabase.from('matchups').insert(rows)
+        if (error) throw error
+        setScheduleMsg({ t: 'ok', v: `Season schedule generated — ${rows.length} matchups across 13 weeks.` })
+      }
+    } catch (err) {
+      setScheduleMsg({ t: 'err', v: `Schedule failed: ${err.message}` })
+    }
+    setBusy(false)
+  }
+
+  const setStatsSource = async (src) => {
+    await supabase.from('leagues').update({ stats_source: src }).eq('id', league.id)
+    setWeekMsg({ t: 'ok', v: src === 'live' ? 'Stats source: LIVE (current season).' : `Stats source: 2025 week ${src.split(':')[1]} (mock).` })
+  }
+
   const canStart = league.draft_order && teams.length >= 2 &&
     (isMock || league.status === 'locked')
 
@@ -1062,6 +1200,29 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
             </button>
           </div>
           {weekMsg && <p className={`msg ${weekMsg.t}`}>{weekMsg.v}</p>}
+
+          <hr className="divider" />
+          <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Season schedule & stats source</h3>
+          <p className="sub">
+            Stats source: <b>{(league.stats_source || 'live') === 'live'
+              ? `LIVE — ${league.season || CURRENT_SEASON} week ${league.current_week || 1}`
+              : `MOCK — 2025 week ${(league.stats_source || '').split(':')[1]}`}</b>
+          </p>
+          <div className="admin-actions">
+            <button className="btn" disabled={busy} onClick={generateSchedule}>Generate season schedule (13 wks)</button>
+            <button className="btn" disabled={busy} onClick={() => setStatsSource('live')}>Use live stats</button>
+            <input
+              className="input" style={{ maxWidth: 80, flex: 'none', padding: '8px 10px' }}
+              type="number" min="1" max="18" value={mockWeekInput}
+              onChange={e => setMockWeekInput(e.target.value)}
+              aria-label="2025 week number"
+            />
+            <button className="btn btn-mock" disabled={busy}
+              onClick={() => setStatsSource(`2025:${Math.min(18, Math.max(1, parseInt(mockWeekInput) || 1))}`)}>
+              Use 2025 week (mock)
+            </button>
+          </div>
+          {scheduleMsg && <p className={`msg ${scheduleMsg.t}`}>{scheduleMsg.v}</p>}
         </>
       )}
 
@@ -1762,6 +1923,280 @@ function CoachCard({ buildContext }) {
       </button>
       {resp && <div className="coach-say">{resp}</div>}
       {err && <p className="msg err">{err}</p>}
+    </div>
+  )
+}
+
+// ============================================================
+// SCOREBOARD — live matchup scoring (polls Sleeper every 60s)
+// ============================================================
+function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
+  const week = league.current_week || 1
+  const source = league.stats_source || 'live'
+  const [rosters, setRosters] = useState([])
+  const [playersById, setPlayersById] = useState({})
+  const [stats, setStats] = useState({})
+  const [matchups, setMatchups] = useState([])
+  const [lastFetch, setLastFetch] = useState(null)
+  const [sim, setSim] = useState(false)
+  const [simF, setSimF] = useState(1)
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const { statsYear, statsWeek } = useMemo(() => {
+    if (source.startsWith('2025:')) {
+      return { statsYear: 2025, statsWeek: parseInt(source.split(':')[1], 10) || 1 }
+    }
+    return { statsYear: league.season || CURRENT_SEASON, statsWeek: week }
+  }, [source, week, league.season])
+
+  const teamsById = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams])
+
+  // Load rosters (league-wide, this week) + player records + matchups
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const { data: ro } = await supabase
+        .from('rosters').select('*')
+        .eq('league_id', league.id).eq('week', week)
+      if (!mounted) return
+      setRosters(ro || [])
+      const ids = [...new Set((ro || []).map(r => r.player_id))]
+      const byId = {}
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: ps } = await supabase
+          .from('players').select('*').in('id', ids.slice(i, i + 300))
+        ;(ps || []).forEach(p => { byId[p.id] = p })
+      }
+      if (mounted) setPlayersById(byId)
+      const { data: mu } = await supabase
+        .from('matchups').select('*')
+        .eq('league_id', league.id).eq('week', week)
+      if (mounted) setMatchups(mu || [])
+    })()
+    return () => { mounted = false }
+  }, [league.id, week])
+
+  // Poll Sleeper stats every 60s while this tab is open
+  useEffect(() => {
+    let mounted = true
+    const fetchStats = async () => {
+      try {
+        const res = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${statsYear}/${statsWeek}`)
+        if (!res.ok) return
+        const raw = await res.json()
+        if (mounted) { setStats(normalizeSleeperStats(raw)); setLastFetch(new Date()) }
+      } catch { /* transient network issues — next poll retries */ }
+    }
+    fetchStats()
+    const t = setInterval(fetchStats, 60000)
+    return () => { mounted = false; clearInterval(t) }
+  }, [statsYear, statsWeek])
+
+  // Simulated-live replay: reveal 0% -> 100% of the week's stats over ~3 min
+  useEffect(() => {
+    if (!sim) { setSimF(1); return }
+    setSimF(0)
+    const t = setInterval(() => {
+      setSimF(f => {
+        const next = Math.min(1, f + 0.028) // ~36 steps × 5s ≈ 3 min
+        if (next >= 1) clearInterval(t)
+        return next
+      })
+    }, 5000)
+    return () => clearInterval(t)
+  }, [sim])
+
+  const starterRows = useMemo(
+    () => rosters.filter(r => ROSTER_SLOTS.includes(r.slot)),
+    [rosters]
+  )
+
+  const playerPts = useCallback((playerId) => {
+    const p = playersById[playerId]
+    return fantasyPoints(scaleStats(stats[playerId], simF), p?.position)
+  }, [playersById, stats, simF])
+
+  const teamScore = useCallback((teamId) => {
+    const total = starterRows
+      .filter(r => r.team_id === teamId)
+      .reduce((sum, r) => sum + playerPts(r.player_id), 0)
+    return Math.round(total * 100) / 100
+  }, [starterRows, playerPts])
+
+  const myMatchup = matchups.find(m => m.home_team_id === myTeamId || m.away_team_id === myTeamId)
+
+  const finalizeWeek = async () => {
+    if (!window.confirm(`Finalize week ${week} scores? This writes results and marks matchups complete.`)) return
+    setBusy(true)
+    try {
+      // 1. per-player scores for all starters
+      const scoreRows = starterRows.map(r => ({
+        league_id: league.id, team_id: r.team_id, player_id: r.player_id,
+        week, fantasy_points: playerPts(r.player_id),
+        stats: stats[r.player_id] || null,
+      }))
+      for (let i = 0; i < scoreRows.length; i += 200) {
+        const { error } = await supabase.from('scores')
+          .upsert(scoreRows.slice(i, i + 200), { onConflict: 'league_id,team_id,player_id,week' })
+        if (error) throw error
+      }
+      // 2. matchup results
+      for (const m of matchups) {
+        const { error } = await supabase.from('matchups').update({
+          home_score: teamScore(m.home_team_id),
+          away_score: teamScore(m.away_team_id),
+          completed: true,
+        }).eq('id', m.id)
+        if (error) throw error
+      }
+      const { data: mu } = await supabase
+        .from('matchups').select('*')
+        .eq('league_id', league.id).eq('week', week)
+      setMatchups(mu || [])
+      setMsg({ t: 'ok', v: `Week ${week} finalized — standings updated.` })
+    } catch (err) {
+      setMsg({ t: 'err', v: `Finalize failed: ${err.message}` })
+    }
+    setBusy(false)
+  }
+
+  const renderMatchupRow = (m) => {
+    const mine = m.home_team_id === myTeamId || m.away_team_id === myTeamId
+    const hs = m.completed ? m.home_score : teamScore(m.home_team_id)
+    const as = m.completed ? m.away_score : teamScore(m.away_team_id)
+    return (
+      <div key={m.id} className={`mu-row ${mine ? 'mine' : ''}`}>
+        <span className={`mu-team ${hs > as ? 'lead' : ''}`}>{teamsById[m.home_team_id]?.team_name || '?'}</span>
+        <span className="mu-score">{hs.toFixed(1)}</span>
+        <span className="mu-vs">vs</span>
+        <span className="mu-score">{as.toFixed(1)}</span>
+        <span className={`mu-team away ${as > hs ? 'lead' : ''}`}>{teamsById[m.away_team_id]?.team_name || '?'}</span>
+        {m.completed && <span className="mu-final">FINAL</span>}
+      </div>
+    )
+  }
+
+  const myStarters = starterRows.filter(r => r.team_id === myTeamId)
+
+  return (
+    <>
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h2 style={{ fontSize: 32 }}>Week {week} Scoreboard</h2>
+            <span className={`pill ${source === 'live' ? 'active' : 'mock'}`}>
+              {source === 'live' ? `live · ${statsYear}` : `mock · 2025 wk ${statsWeek}`}
+            </span>
+          </div>
+          <div style={{ textAlign: 'right', fontSize: 12, opacity: 0.6 }}>
+            {lastFetch ? `Stats updated ${lastFetch.toLocaleTimeString()}` : 'Fetching stats…'}
+            <br />auto-refreshes every 60s
+            {sim && simF < 1 && <><br /><b>SIMULATING: {Math.round(simF * 100)}% of game time</b></>}
+          </div>
+        </div>
+
+        {matchups.length === 0 ? (
+          <>
+            <hr className="divider" />
+            <p className="sub">No matchups for week {week} yet — the commissioner needs to generate the season schedule (Commissioner Controls → Generate season schedule).</p>
+          </>
+        ) : (
+          <>
+            <hr className="divider" />
+            {matchups.map(renderMatchupRow)}
+          </>
+        )}
+
+        {isLeagueAdmin && matchups.length > 0 && (
+          <div className="admin-actions" style={{ marginTop: 14 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700 }}>
+              <input type="checkbox" checked={sim} onChange={e => setSim(e.target.checked)} />
+              Simulate live game (3-min replay)
+            </label>
+            <button className="btn btn-sm btn-primary" disabled={busy} onClick={finalizeWeek}>
+              Finalize week {week}
+            </button>
+          </div>
+        )}
+        {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
+      </div>
+
+      {myMatchup && (
+        <div className="card">
+          <h2>My starters</h2>
+          {myStarters
+            .sort((a, b) => ROSTER_SLOTS.indexOf(a.slot) - ROSTER_SLOTS.indexOf(b.slot))
+            .map(r => {
+              const p = playersById[r.player_id]
+              return (
+                <div key={r.id} className="lineup-row">
+                  <span className="lslot">{r.slot}</span>
+                  <span className="lname">{p?.name || r.player_id}</span>
+                  <span className="lmeta">{p?.position} · {p?.nfl_team || 'FA'}</span>
+                  <span className="lproj">{playerPts(r.player_id).toFixed(1)} pts</span>
+                </div>
+              )
+            })}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ============================================================
+// STANDINGS — computed from completed matchups
+// ============================================================
+function Standings({ league, teams, myTeamId }) {
+  const [matchups, setMatchups] = useState([])
+
+  useEffect(() => {
+    let mounted = true
+    supabase.from('matchups').select('*')
+      .eq('league_id', league.id).eq('completed', true)
+      .then(({ data }) => { if (mounted) setMatchups(data || []) })
+    return () => { mounted = false }
+  }, [league.id])
+
+  const rows = useMemo(() => {
+    const rec = {}
+    teams.forEach(t => { rec[t.id] = { team: t, w: 0, l: 0, t: 0, pf: 0, pa: 0 } })
+    matchups.forEach(m => {
+      const h = rec[m.home_team_id], a = rec[m.away_team_id]
+      if (!h || !a) return
+      h.pf += m.home_score; h.pa += m.away_score
+      a.pf += m.away_score; a.pa += m.home_score
+      if (m.home_score > m.away_score) { h.w++; a.l++ }
+      else if (m.away_score > m.home_score) { a.w++; h.l++ }
+      else { h.t++; a.t++ }
+    })
+    return Object.values(rec).sort((x, y) =>
+      (y.w - x.w) || (y.pf - x.pf) // wins, then points-for (league tiebreaker)
+    )
+  }, [teams, matchups])
+
+  return (
+    <div className="card">
+      <h2>Standings</h2>
+      <p className="sub">Ranked by record, ties broken by points for. Top 6 make the playoffs (weeks 14-17).</p>
+      <div className="board-scroll">
+        <table className="board" style={{ minWidth: 560 }}>
+          <thead>
+            <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.team.id} style={r.team.id === myTeamId ? { background: '#FDEBDD' } : undefined}>
+                <td className="rnd">{i + 1}</td>
+                <td className="filled"><span className="bp-name">{r.team.team_name}</span>
+                  <div className="bp-meta">{r.team.user_name}{i < 6 ? ' · playoff spot' : ''}</div></td>
+                <td>{r.w}</td><td>{r.l}</td><td>{r.t}</td>
+                <td>{Math.round(r.pf * 10) / 10}</td><td>{Math.round(r.pa * 10) / 10}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
