@@ -5,17 +5,41 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v2.4' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v3.0' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
+// ⚠️ REPLACE with your final GitHub Pages URL before committing
 const APP_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/'
 
 const FANTASY_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
 const ROSTER_SLOTS = ['QB', 'RB1', 'RB2', 'WR1', 'WR2', 'TE', 'FLEX', 'K', 'DEF']
 const BENCH_SLOTS = ['BN1', 'BN2', 'BN3', 'BN4', 'BN5', 'BN6', 'BN7']
 const TOTAL_ROUNDS = 16 // 9 starters + 7 bench
-const DRAFT_PICK_TIMER = 60 // seconds
+const DRAFT_PICK_TIMER = 90 // seconds
 const BOT_PICK_DELAY_MS = 1500
+
+// League scoring — HALF PPR (0.5 per reception). Used by the Phase 4 engine
+// and referenced anywhere points are computed or labeled.
+export const SCORING = {
+  pass_td: 4, pass_yd: 0.04, pass_int: -2,
+  rush_td: 6, rush_yd: 0.1,
+  rec_td: 6, rec_yd: 0.1, rec: 0.5, // ← half-PPR
+  fum_lost: -2, two_pt: 2,
+  fg_0_39: 3, fg_40_49: 4, fg_50p: 5, xp: 1,
+  def_td: 6, def_sack: 1, def_int: 2, def_fum_rec: 2, def_safety: 2,
+  def_pa_tiers: [
+    [0, 0, 10], [1, 6, 7], [7, 13, 4], [14, 20, 1],
+    [21, 27, 0], [28, 34, -1], [35, Infinity, -4],
+  ],
+}
+
+// Which positions may occupy each lineup slot (bench takes anyone)
+const SLOT_ELIG = {
+  QB: ['QB'], RB1: ['RB'], RB2: ['RB'], WR1: ['WR'], WR2: ['WR'],
+  TE: ['TE'], FLEX: ['RB', 'WR', 'TE'], K: ['K'], DEF: ['DEF'],
+}
+const slotAccepts = (position, slot) =>
+  slot.startsWith('BN') ? true : (SLOT_ELIG[slot] || []).includes(position)
 
 const BOT_NAMES = [
   'Gridiron Bots', 'Blitz Machine', 'End Zone AI', 'Pixel Pushers',
@@ -187,6 +211,32 @@ body { font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; 
 .board .bp-meta { opacity: 0.6; font-size: 11px; }
 .board .bp-empty { opacity: 0.3; }
 
+/* ---------- Tabs / Team page ---------- */
+.tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.tab {
+  font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.04em;
+  padding: 8px 20px; border: 2px solid var(--ink); border-radius: 8px;
+  background: var(--chalk); cursor: pointer;
+}
+.tab.on { background: var(--ink); color: var(--cream); }
+.lineup-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 2px solid var(--line); border-radius: 8px; margin-bottom: 6px;
+  background: var(--chalk); font-size: 14px;
+}
+.lineup-row.tappable { cursor: pointer; }
+.lineup-row.tappable:hover { border-color: var(--ink); }
+.lineup-row.sel { border-color: var(--orange); background: #FDEBDD; }
+.lineup-row.open { border-style: dashed; background: var(--cream); }
+.lineup-row .lslot { font-family: 'Bebas Neue', sans-serif; font-size: 15px; min-width: 48px; color: var(--turf); }
+.lineup-row .lname { font-weight: 700; flex: 1; }
+.lineup-row .lmeta { font-size: 12px; opacity: 0.65; }
+.lineup-row .lproj { font-size: 12px; font-weight: 700; min-width: 70px; text-align: right; }
+.lock-banner {
+  margin-top: 12px; padding: 10px 14px; border-radius: 8px;
+  background: var(--orange); color: var(--chalk); font-weight: 700; font-size: 14px;
+}
+
 @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 `
 
@@ -198,6 +248,26 @@ function makeJoinCode() {
   let code = ''
   for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)]
   return code
+}
+
+// Next Sunday at 1:00 PM Eastern, DST-safe (17:00 UTC during EDT, 18:00 during EST)
+function nextSunday1pmET(from = new Date()) {
+  const nyHourOf = d => parseInt(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: 'numeric', hour12: false,
+  }).format(d), 10)
+  const day = new Date(from)
+  day.setUTCHours(0, 0, 0, 0)
+  for (let i = 0; i < 15; i++) { // scan up to two weeks of days
+    if (day.getUTCDay() === 0) {
+      for (const h of [17, 18]) {
+        const cand = new Date(day)
+        cand.setUTCHours(h)
+        if (cand > from && nyHourOf(cand) === 13) return cand
+      }
+    }
+    day.setUTCDate(day.getUTCDate() + 1)
+  }
+  return day
 }
 
 // Snake draft: which slot in draft_order picks at overall pick n (0-indexed)
@@ -370,7 +440,7 @@ function LoginScreen({ onLogin }) {
   return (
     <div className="login-hero">
       <h1 className="display">BOL<br /><span className="accent">FANTASY</span><br />FOOTBALL</h1>
-      <p>12 teams. Standard scoring. One office champion. Sign in with Google to claim your spot.</p>
+      <p>12 teams. Half-PPR scoring. One office champion. Sign in with Google to claim your spot.</p>
       <button className="btn btn-primary" onClick={onLogin}>Sign in with Google</button>
     </div>
   )
@@ -481,6 +551,7 @@ function Lobby({ session, isAdmin, onDone }) {
 function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMock, onEnterMock, onExitMock, reloadTop }) {
   const [league, setLeague] = useState(initialLeague)
   const [teams, setTeams] = useState([])
+  const [tab, setTab] = useState('home')
 
   useEffect(() => {
     let mounted = true
@@ -510,12 +581,20 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 
   const isLeagueAdmin = isAdmin || league.admin_id === session.user.id
   const drafting = league.status === 'drafting'
+  const active = league.status === 'active'
 
   return (
     <>
       {isMock && (
         <div className="mock-banner">
           MOCK DRAFT MODE — practice league, only visible to the commissioner. Nothing here touches the real league.
+        </div>
+      )}
+
+      {active && (
+        <div className="tabs">
+          <button className={`tab ${tab === 'home' ? 'on' : ''}`} onClick={() => setTab('home')}>League</button>
+          <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>My Team</button>
         </div>
       )}
 
@@ -527,6 +606,13 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           myTeamId={myTeamId}
           isLeagueAdmin={isLeagueAdmin}
           isMock={isMock}
+        />
+      ) : active && tab === 'team' ? (
+        <TeamPage
+          league={league}
+          teams={teams}
+          myTeamId={myTeamId}
+          isLeagueAdmin={isLeagueAdmin}
         />
       ) : (
         <LeagueHome
@@ -690,7 +776,8 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
         : Object.entries(raw).map(([pid, s]) => [String(pid), s])
       const ptsById = new Map()
       statPairs.forEach(([pid, s]) => {
-        const pts = s?.pts_std
+        // Half-PPR to match league scoring (fall back to standard if absent)
+        const pts = s?.pts_half_ppr ?? s?.pts_std
         if (pid && typeof pts === 'number' && pts !== 0) {
           const gp = typeof s?.gp === 'number' && s.gp > 0 ? s.gp : null
           ptsById.set(pid, {
@@ -794,6 +881,51 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     return league.draft_order.map(id => byId[id]?.team_name || '?')
   }, [league.draft_order, teams])
 
+  // ---------- WEEK & LINEUP LOCK (active season) ----------
+  const [weekMsg, setWeekMsg] = useState(null)
+
+  const setLockNextSunday = async () => {
+    const at = nextSunday1pmET()
+    await supabase.from('leagues').update({ lineup_lock_at: at.toISOString() }).eq('id', league.id)
+    setWeekMsg({ t: 'ok', v: `Lineups lock ${at.toLocaleString()} (your local time).` })
+  }
+  const clearLock = async () => {
+    await supabase.from('leagues').update({ lineup_lock_at: null }).eq('id', league.id)
+    setWeekMsg({ t: 'ok', v: 'Lineup lock cleared — lineups are editable.' })
+  }
+  const advanceWeek = async () => {
+    setBusy(true)
+    try {
+      const cur = league.current_week || 1
+      const next = cur + 1
+      // Copy this week's rosters forward (skip if already copied)
+      const { count } = await supabase
+        .from('rosters').select('id', { count: 'exact', head: true })
+        .eq('league_id', league.id).eq('week', next)
+      if ((count || 0) === 0) {
+        const { data: prev, error } = await supabase
+          .from('rosters').select('*')
+          .eq('league_id', league.id).eq('week', cur)
+        if (error) throw error
+        const rows = (prev || []).map(r => ({
+          league_id: r.league_id, team_id: r.team_id,
+          player_id: r.player_id, slot: r.slot, week: next,
+        }))
+        for (let i = 0; i < rows.length; i += 200) {
+          const { error: insErr } = await supabase.from('rosters').insert(rows.slice(i, i + 200))
+          if (insErr) throw insErr
+        }
+      }
+      await supabase.from('leagues')
+        .update({ current_week: next, lineup_lock_at: null })
+        .eq('id', league.id)
+      setWeekMsg({ t: 'ok', v: `Advanced to week ${next} — rosters carried over, lock cleared.` })
+    } catch (err) {
+      setWeekMsg({ t: 'err', v: `Advance failed: ${err.message}` })
+    }
+    setBusy(false)
+  }
+
   const canStart = league.draft_order && teams.length >= 2 &&
     (isMock || league.status === 'locked')
 
@@ -845,6 +977,27 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
           <ol className="order-list" style={{ paddingLeft: 20 }}>
             {orderNames.map((n, i) => <li key={i}>{n}</li>)}
           </ol>
+        </>
+      )}
+
+      {league.status === 'active' && (
+        <>
+          <hr className="divider" />
+          <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Week & lineup lock</h3>
+          <p className="sub">
+            Week {league.current_week || 1} ·{' '}
+            {league.lineup_lock_at
+              ? `lineups lock ${new Date(league.lineup_lock_at).toLocaleString()}`
+              : 'no lineup lock set'}
+          </p>
+          <div className="admin-actions">
+            <button className="btn" disabled={busy} onClick={setLockNextSunday}>Lock at Sunday 1pm ET</button>
+            <button className="btn" disabled={busy || !league.lineup_lock_at} onClick={clearLock}>Clear lock</button>
+            <button className="btn btn-turf" disabled={busy} onClick={advanceWeek}>
+              Advance to week {(league.current_week || 1) + 1}
+            </button>
+          </div>
+          {weekMsg && <p className={`msg ${weekMsg.t}`}>{weekMsg.v}</p>}
         </>
       )}
 
@@ -1104,10 +1257,10 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
               <div key={p.id} className="pool-row">
                 <span className="pname">{p.name}</span>
                 <span className="pmeta">{p.position} · {p.nfl_team || 'FA'}</span>
-                <span className="prank" title="2025 avg points/game">
+                <span className="prank" title="2025 avg points/game (half-PPR)">
                   {p.last_season_avg != null ? `${p.last_season_avg} avg` : '—'}
                 </span>
-                <span className="prank" title="2025 total fantasy points (standard)">
+                <span className="prank" title="2025 total fantasy points (half-PPR)">
                   {p.last_season_pts != null ? `${p.last_season_pts} pts` : '—'}
                 </span>
                 <span className="prank">#{p.adp ?? '—'}</span>
@@ -1216,5 +1369,197 @@ function DraftBoard({ league, teams, picks, playersById, numTeams }) {
         </div>
       )}
     </div>
+  )
+}
+
+// ============================================================
+// TEAM PAGE — weekly lineup with tap-to-swap, lock, projections
+// ============================================================
+function TeamPage({ league, teams, myTeamId, isLeagueAdmin }) {
+  const [roster, setRoster] = useState([])       // my roster rows for the current week
+  const [playersById, setPlayersById] = useState({})
+  const [proj, setProj] = useState({})           // player_id -> projected pts (half-PPR)
+  const [selectedId, setSelectedId] = useState(null) // roster row id
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const week = league.current_week || 1
+  const lockMs = league.lineup_lock_at ? new Date(league.lineup_lock_at).getTime() : null
+  const locked = lockMs != null && Date.now() >= lockMs
+  const canEdit = !locked || isLeagueAdmin
+  const myTeam = teams.find(t => t.id === myTeamId)
+
+  const loadRoster = useCallback(async () => {
+    const { data } = await supabase
+      .from('rosters').select('*')
+      .eq('league_id', league.id).eq('team_id', myTeamId).eq('week', week)
+    const rows = data || []
+    setRoster(rows)
+    const ids = rows.map(r => r.player_id)
+    if (ids.length) {
+      const { data: ps } = await supabase.from('players').select('*').in('id', ids)
+      setPlayersById(Object.fromEntries((ps || []).map(p => [p.id, p])))
+    }
+  }, [league.id, myTeamId, week])
+
+  useEffect(() => { loadRoster() }, [loadRoster])
+
+  // Projections for this week (fetched live from Sleeper, half-PPR)
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const res = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
+        if (!res.ok) return
+        const raw = await res.json()
+        const pairs = Array.isArray(raw)
+          ? raw.map(r => [String(r.player_id ?? r.player?.player_id ?? ''), r.stats ?? r])
+          : Object.entries(raw).map(([pid, s]) => [String(pid), s])
+        const map = {}
+        pairs.forEach(([pid, s]) => {
+          const pts = s?.pts_half_ppr ?? s?.pts_std
+          if (pid && typeof pts === 'number') map[pid] = Math.round(pts * 10) / 10
+        })
+        if (mounted) setProj(map)
+      } catch { /* projections are decorative — fail quietly */ }
+    })()
+    return () => { mounted = false }
+  }, [league.season, week])
+
+  const rowBySlot = useMemo(() => Object.fromEntries(roster.map(r => [r.slot, r])), [roster])
+
+  const handleTap = async (target) => {
+    // target: { row } for an occupied slot, or { emptySlot } for an open starter slot
+    if (!canEdit || busy) return
+    setMsg(null)
+
+    // First tap: select a player
+    if (!selectedId) {
+      if (target.row) setSelectedId(target.row.id)
+      return
+    }
+    const a = roster.find(r => r.id === selectedId)
+    if (!a) { setSelectedId(null); return }
+
+    // Tap self: deselect
+    if (target.row && target.row.id === a.id) { setSelectedId(null); return }
+
+    const pa = playersById[a.player_id]
+    setBusy(true)
+    try {
+      if (target.emptySlot) {
+        // Move into an open slot
+        if (!slotAccepts(pa?.position, target.emptySlot)) {
+          setMsg({ t: 'err', v: `${pa?.name || 'That player'} can't go in ${target.emptySlot}.` })
+        } else {
+          const { error } = await supabase.from('rosters')
+            .update({ slot: target.emptySlot }).eq('id', a.id)
+          if (error) throw error
+          await loadRoster()
+        }
+      } else {
+        // Swap two players
+        const b = target.row
+        const pb = playersById[b.player_id]
+        if (!slotAccepts(pa?.position, b.slot) || !slotAccepts(pb?.position, a.slot)) {
+          setMsg({ t: 'err', v: `That swap isn't position-legal (${pa?.position} ↔ ${pb?.position}).` })
+        } else {
+          // Delete both, reinsert with swapped slots (unique constraints prevent partial states)
+          const core = r => ({ league_id: r.league_id, team_id: r.team_id, player_id: r.player_id, week: r.week })
+          const { error: delErr } = await supabase.from('rosters').delete().in('id', [a.id, b.id])
+          if (delErr) throw delErr
+          const { error: insErr } = await supabase.from('rosters').insert([
+            { ...core(a), slot: b.slot },
+            { ...core(b), slot: a.slot },
+          ])
+          if (insErr) {
+            // restore originals if the swap insert failed
+            await supabase.from('rosters').insert([
+              { ...core(a), slot: a.slot },
+              { ...core(b), slot: b.slot },
+            ])
+            throw insErr
+          }
+          await loadRoster()
+        }
+      }
+    } catch (err) {
+      setMsg({ t: 'err', v: `Move failed: ${err.message}` })
+      await loadRoster()
+    }
+    setSelectedId(null)
+    setBusy(false)
+  }
+
+  const renderRow = (slot) => {
+    const row = rowBySlot[slot]
+    const p = row ? playersById[row.player_id] : null
+    const isSel = row && row.id === selectedId
+    return (
+      <div
+        key={slot}
+        className={`lineup-row ${isSel ? 'sel' : ''} ${!row ? 'open' : ''} ${canEdit ? 'tappable' : ''}`}
+        onClick={() => row ? handleTap({ row }) : handleTap({ emptySlot: slot })}
+      >
+        <span className="lslot">{slot}</span>
+        {p ? (
+          <>
+            <span className="lname">{p.name}</span>
+            <span className="lmeta">{p.position} · {p.nfl_team || 'FA'}</span>
+            <span className="lproj">{proj[p.id] != null ? `${proj[p.id]} proj` : '—'}</span>
+          </>
+        ) : (
+          <span className="lmeta">Empty — tap a player, then tap here</span>
+        )}
+      </div>
+    )
+  }
+
+  const starterProj = ROSTER_SLOTS.reduce((sum, slot) => {
+    const row = rowBySlot[slot]
+    return sum + (row && proj[row.player_id] != null ? proj[row.player_id] : 0)
+  }, 0)
+
+  return (
+    <>
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h2 style={{ fontSize: 32 }}>{myTeam?.team_name || 'My Team'}</h2>
+            <span className="pill active">Week {week}</span>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p className="sub" style={{ marginBottom: 2 }}>Projected starters total</p>
+            <div className="display" style={{ fontSize: 34 }}>{Math.round(starterProj * 10) / 10}</div>
+          </div>
+        </div>
+
+        {locked && (
+          <div className="lock-banner">
+            Lineups are locked for week {week}
+            {isLeagueAdmin ? ' — commissioner override active, edits still allowed.' : '.'}
+          </div>
+        )}
+        {!locked && lockMs && (
+          <p className="sub" style={{ marginTop: 8 }}>
+            Lineups lock {new Date(lockMs).toLocaleString()}.
+          </p>
+        )}
+
+        <hr className="divider" />
+        <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Starters</h3>
+        {ROSTER_SLOTS.map(renderRow)}
+
+        <h3 className="display" style={{ fontSize: 20, margin: '18px 0 8px' }}>Bench</h3>
+        {BENCH_SLOTS.map(renderRow)}
+
+        {canEdit && (
+          <p className="sub" style={{ marginTop: 12 }}>
+            Tap a player, then tap another player (or an empty slot) to swap. Position rules apply.
+          </p>
+        )}
+        {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
+      </div>
+    </>
   )
 }
