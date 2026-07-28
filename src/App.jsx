@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v4.5' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v4.6' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1185,10 +1185,22 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
           if (insErr) throw insErr
         }
       }
+      // If we're on a mock (2025) stat source, advance it in lockstep so each
+      // league week scores against a fresh 2025 week instead of repeating.
+      const src = league.stats_source || 'live'
+      let nextSource = src
+      if (src.startsWith('2025:')) {
+        const w = parseInt(src.split(':')[1], 10) || 1
+        nextSource = `2025:${Math.min(18, w + 1)}`
+      }
       await supabase.from('leagues')
-        .update({ current_week: next, lineup_lock_at: null })
+        .update({ current_week: next, lineup_lock_at: null, stats_source: nextSource })
         .eq('id', league.id)
-      setWeekMsg({ t: 'ok', v: `Advanced to week ${next} — rosters carried over, lock cleared.` })
+      setWeekMsg({
+        t: 'ok',
+        v: `Advanced to week ${next} — rosters carried over, lock cleared` +
+          (nextSource !== src ? `, mock stats now 2025 week ${nextSource.split(':')[1]}.` : '.'),
+      })
     } catch (err) {
       setWeekMsg({ t: 'err', v: `Advance failed: ${err.message}` })
     }
