@@ -681,24 +681,48 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     try {
       const res = await fetch('https://api.sleeper.app/v1/stats/nfl/regular/2025')
       if (!res.ok) throw new Error(`Sleeper API returned ${res.status}`)
-      const stats = await res.json()
-      const { data: existing } = await supabase.from('players').select('id').limit(5000)
-      const ids = new Set((existing || []).map(p => p.id))
-      const rows = []
-      Object.entries(stats).forEach(([pid, s]) => {
-        if (!ids.has(String(pid))) return
+      const raw = await res.json()
+
+      // Normalize: endpoint may return an object keyed by player_id OR an array of stat rows
+      const statPairs = Array.isArray(raw)
+        ? raw.map(r => [String(r.player_id ?? r.player?.player_id ?? ''), r.stats ?? r])
+        : Object.entries(raw).map(([pid, s]) => [String(pid), s])
+      const ptsById = new Map()
+      statPairs.forEach(([pid, s]) => {
         const pts = s?.pts_std
-        if (typeof pts === 'number' && pts !== 0) {
-          rows.push({ id: String(pid), last_season_pts: Math.round(pts * 10) / 10 })
+        if (pid && typeof pts === 'number' && pts !== 0) {
+          ptsById.set(pid, Math.round(pts * 10) / 10)
         }
       })
+      if (ptsById.size === 0) throw new Error('No usable 2025 stats found in the response.')
+
+      // Page through ALL player ids (Supabase caps responses at 1,000 rows per request)
+      const allIds = []
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('players').select('id').range(from, from + 999)
+        if (error) throw error
+        allIds.push(...(data || []).map(p => String(p.id)))
+        if (!data || data.length < 1000) break
+      }
+
+      const rows = allIds
+        .filter(id => ptsById.has(id))
+        .map(id => ({ id, last_season_pts: ptsById.get(id) }))
       setSeedMsg({ t: 'ok', v: `Updating ${rows.length} players with 2025 points…` })
+
       for (let i = 0; i < rows.length; i += 500) {
-        const chunk = rows.slice(i, i + 500)
-        // upsert only touches id + last_season_pts; other columns unchanged
-        const { error: upErr } = await supabase.from('players')
-          .upsert(chunk, { onConflict: 'id' })
-        if (upErr) throw upErr
+        let chunk = rows.slice(i, i + 500)
+        // Belt and braces: verify this batch against the DB immediately before writing,
+        // so only players that truly exist are ever touched (update-only, never insert).
+        const { data: present, error: vErr } = await supabase
+          .from('players').select('id').in('id', chunk.map(r => r.id))
+        if (vErr) throw vErr
+        const ok = new Set((present || []).map(p => String(p.id)))
+        chunk = chunk.filter(r => ok.has(r.id))
+        if (chunk.length === 0) continue
+        const { error } = await supabase.from('players').upsert(chunk, { onConflict: 'id' })
+        if (error) throw error
         setSeedMsg({ t: 'ok', v: `Updating… ${Math.min(i + 500, rows.length)} / ${rows.length}` })
       }
       setSeedMsg({ t: 'ok', v: `Done — 2025 season points imported for ${rows.length} players.` })
