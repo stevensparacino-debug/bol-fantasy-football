@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v4.6' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v5.0' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -271,6 +271,19 @@ body { font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; 
 .mu-score { font-family: 'Bebas Neue', sans-serif; font-size: 22px; min-width: 58px; text-align: center; }
 .mu-vs { font-size: 11px; opacity: 0.5; }
 .mu-final { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; background: var(--ink); color: var(--cream); padding: 3px 7px; border-radius: 4px; }
+
+/* ---------- Trades / transactions ---------- */
+.trade-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 2px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+  background: var(--chalk); font-size: 13px; flex-wrap: wrap;
+}
+.trade-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 700px) { .trade-grid { grid-template-columns: 1fr; } }
+.txn-row { font-size: 13px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.txn-row:last-child { border-bottom: none; }
+.txn-row .when { font-size: 11px; opacity: 0.5; }
+.drop-picker { margin-top: 14px; padding-top: 6px; border-top: 2px dashed var(--line); }
 
 @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 `
@@ -802,6 +815,90 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
     })()
   }, [league?.status, league?.id, teams.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Trade processor: accepted trades are executed by the admin's client
+  // (RLS only lets the admin write both teams' rosters). Runs on load and
+  // whenever a trade row changes.
+  const [tradeTick, setTradeTick] = useState(0)
+  useEffect(() => {
+    const channel = supabase
+      .channel(`trades-${leagueId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'trades', filter: `league_id=eq.${leagueId}` },
+        () => setTradeTick(t => t + 1))
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [leagueId])
+
+  useEffect(() => {
+    if (!league || league.status !== 'active') return
+    const amAdmin = isAdmin || league.admin_id === session.user.id
+    if (!amAdmin) return
+    ;(async () => {
+      const { data: accepted } = await supabase
+        .from('trades').select('*')
+        .eq('league_id', league.id).eq('status', 'accepted')
+      for (const tr of (accepted || [])) {
+        try {
+          const week = league.current_week || 1
+          const give = tr.from_player_ids || []   // proposer sends these
+          const get = tr.to_player_ids || []      // proposer receives these
+          const involved = [...give, ...get]
+          const { data: rows } = await supabase
+            .from('rosters').select('*')
+            .eq('league_id', league.id).eq('week', week)
+            .in('player_id', involved)
+          const fromRows = (rows || []).filter(r => r.team_id === tr.from_team_id && give.includes(r.player_id))
+          const toRows = (rows || []).filter(r => r.team_id === tr.to_team_id && get.includes(r.player_id))
+          if (fromRows.length !== give.length || toRows.length !== get.length) {
+            await supabase.from('trades').update({ status: 'rejected' }).eq('id', tr.id)
+            continue // rosters changed since acceptance — void the trade
+          }
+          const { data: ps } = await supabase.from('players').select('*').in('id', involved)
+          const pById = Object.fromEntries((ps || []).map(p => [p.id, p]))
+          const assign = (incomingIds, vacatedSlots) => {
+            const slots = [...vacatedSlots]
+            const out = []
+            const remaining = [...incomingIds]
+            // legal-first greedy, then force into whatever's left
+            for (const slot of [...slots]) {
+              const idx = remaining.findIndex(pid => slotAccepts(pById[pid]?.position, slot))
+              if (idx >= 0) {
+                out.push({ player_id: remaining.splice(idx, 1)[0], slot })
+                slots.splice(slots.indexOf(slot), 1)
+              }
+            }
+            remaining.forEach((pid, i) => out.push({ player_id: pid, slot: slots[i] }))
+            return out
+          }
+          const fromSlots = fromRows.map(r => r.slot)
+          const toSlots = toRows.map(r => r.slot)
+          const ids = [...fromRows, ...toRows].map(r => r.id)
+          await supabase.from('rosters').delete().in('id', ids)
+          const inserts = [
+            ...assign(get, fromSlots).map(a => ({
+              league_id: league.id, team_id: tr.from_team_id, player_id: a.player_id, slot: a.slot, week,
+            })),
+            ...assign(give, toSlots).map(a => ({
+              league_id: league.id, team_id: tr.to_team_id, player_id: a.player_id, slot: a.slot, week,
+            })),
+          ]
+          const { error: insErr } = await supabase.from('rosters').insert(inserts)
+          if (insErr) throw insErr
+          await supabase.from('trades').update({ status: 'processed' }).eq('id', tr.id)
+          const nameOf = pid => pById[pid]?.name || pid
+          await supabase.from('transactions').insert({
+            league_id: league.id, team_id: tr.from_team_id, type: 'trade',
+            detail: {
+              summary: `${teams.find(t => t.id === tr.from_team_id)?.team_name || '?'} traded ` +
+                `${give.map(nameOf).join(', ')} to ` +
+                `${teams.find(t => t.id === tr.to_team_id)?.team_name || '?'} for ${get.map(nameOf).join(', ')}`,
+            },
+          })
+        } catch (e) { console.error('trade processing failed', e) }
+      }
+    })()
+  }, [league?.status, league?.id, league?.current_week, tradeTick, teams]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     let mounted = true
     const loadLeague = async () => {
@@ -845,6 +942,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           <button className={`tab ${tab === 'home' ? 'on' : ''}`} onClick={() => setTab('home')}>League</button>
           <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>My Team</button>
           <button className={`tab ${tab === 'scores' ? 'on' : ''}`} onClick={() => setTab('scores')}>Scoreboard</button>
+          <button className={`tab ${tab === 'players' ? 'on' : ''}`} onClick={() => setTab('players')}>Players</button>
           <button className={`tab ${tab === 'standings' ? 'on' : ''}`} onClick={() => setTab('standings')}>Standings</button>
         </div>
       )}
@@ -872,8 +970,15 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           myTeamId={myTeamId}
           isLeagueAdmin={isLeagueAdmin}
         />
+      ) : active && tab === 'players' ? (
+        <FreeAgents
+          league={league}
+          teams={teams}
+          myTeamId={myTeamId}
+          isLeagueAdmin={isLeagueAdmin}
+        />
       ) : active && tab === 'standings' ? (
-        <Standings league={league} teams={teams} myTeamId={myTeamId} />
+        <Standings league={league} teams={teams} myTeamId={myTeamId} isLeagueAdmin={isLeagueAdmin} />
       ) : (
         <LeagueHome
           league={league}
@@ -924,12 +1029,7 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
             <div key={`e-${i}`} className="team-slot empty">Open slot</div>
           ))}
         </div>
-        {league.status === 'active' && (
-          <>
-            <hr className="divider" />
-            <p className="sub">Draft complete — rosters are set. Weekly lineups and scoring arrive in Phase 3/4.</p>
-          </>
-        )}
+        {league.status === 'active' && <TransactionsFeed league={league} />}
       </div>
 
       {isLeagueAdmin && (
@@ -1944,6 +2044,15 @@ function TeamPage({ league, teams, myTeamId, isLeagueAdmin }) {
             {isLeagueAdmin ? ' — commissioner override active, edits still allowed.' : '.'}
           </div>
         )}
+        {roster.some(r => {
+          const p = playersById[r.player_id]
+          return p && !slotAccepts(p.position, r.slot)
+        }) && (
+          <div className="lock-banner" style={{ background: '#B3261E' }}>
+            Illegal lineup — a player is in a slot their position doesn't allow
+            (this can happen after a trade or add). Tap-swap to fix it before kickoff.
+          </div>
+        )}
         {!locked && lockMs && (
           <p className="sub" style={{ marginTop: 8 }}>
             Lineups lock {new Date(lockMs).toLocaleString()}.
@@ -1964,6 +2073,8 @@ function TeamPage({ league, teams, myTeamId, isLeagueAdmin }) {
         )}
         {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
       </div>
+
+      <TradesPanel league={league} teams={teams} myTeamId={myTeamId} />
     </>
   )
 }
@@ -2316,16 +2427,23 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
 // ============================================================
 // STANDINGS — computed from completed matchups
 // ============================================================
-function Standings({ league, teams, myTeamId }) {
+function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
   const [matchups, setMatchups] = useState([])
+  const [playoffGames, setPlayoffGames] = useState([])
+  const [poMsg, setPoMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    let mounted = true
-    supabase.from('matchups').select('*')
-      .eq('league_id', league.id).eq('completed', true)
-      .then(({ data }) => { if (mounted) setMatchups(data || []) })
-    return () => { mounted = false }
+  const reload = useCallback(async () => {
+    const { data } = await supabase.from('matchups').select('*')
+      .eq('league_id', league.id).eq('completed', true).eq('is_playoff', false)
+    setMatchups(data || [])
+    const { data: po } = await supabase.from('matchups').select('*')
+      .eq('league_id', league.id).eq('is_playoff', true)
+      .order('week', { ascending: true })
+    setPlayoffGames(po || [])
   }, [league.id])
+
+  useEffect(() => { reload() }, [reload])
 
   const rows = useMemo(() => {
     const rec = {}
@@ -2366,6 +2484,451 @@ function Standings({ league, teams, myTeamId }) {
           </tbody>
         </table>
       </div>
+
+      <hr className="divider" />
+      <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Playoffs</h3>
+      {playoffGames.length === 0 ? (
+        <p className="sub">Bracket appears when the commissioner generates round 1 (top 6: seeds 1-2 get byes; 3v6 and 4v5 in week 14).</p>
+      ) : (
+        [...new Set(playoffGames.map(g => g.week))].map(wk => (
+          <div key={wk}>
+            <p className="adv-label">Week {wk}{wk === 14 ? ' · Round 1' : wk === 15 ? ' · Semifinals' : ' · Championship'}</p>
+            {playoffGames.filter(g => g.week === wk).map(g => {
+              const tById = Object.fromEntries(teams.map(t => [t.id, t]))
+              return (
+                <div key={g.id} className="mu-row">
+                  <span className={`mu-team ${g.completed && g.home_score > g.away_score ? 'lead' : ''}`}>{tById[g.home_team_id]?.team_name}</span>
+                  <span className="mu-score">{(g.home_score || 0).toFixed(1)}</span>
+                  <span className="mu-vs">vs</span>
+                  <span className="mu-score">{(g.away_score || 0).toFixed(1)}</span>
+                  <span className={`mu-team away ${g.completed && g.away_score > g.home_score ? 'lead' : ''}`}>{tById[g.away_team_id]?.team_name}</span>
+                  {g.completed && <span className="mu-final">FINAL</span>}
+                </div>
+              )
+            })}
+          </div>
+        ))
+      )}
+      {isLeagueAdmin && (
+        <div className="admin-actions" style={{ marginTop: 10 }}>
+          <button className="btn btn-sm" disabled={busy} onClick={async () => {
+            setBusy(true); setPoMsg(null)
+            try {
+              const seeds = rows.map(r => r.team.id) // standings order = seeding
+              const completedPO = playoffGames.filter(g => g.completed)
+              const winnerOf = g => (g.home_score >= g.away_score ? g.home_team_id : g.away_team_id)
+              let inserts = []
+              if (playoffGames.length === 0) {
+                // Round 1 (week 14): 3v6, 4v5; seeds 1-2 bye
+                inserts = [
+                  { week: 14, home_team_id: seeds[2], away_team_id: seeds[5] },
+                  { week: 14, home_team_id: seeds[3], away_team_id: seeds[4] },
+                ]
+              } else if (playoffGames.filter(g => g.week === 14).length === 2 &&
+                         completedPO.filter(g => g.week === 14).length === 2 &&
+                         playoffGames.filter(g => g.week === 15).length === 0) {
+                // Semis (week 15): 1 seed vs worst surviving seed, 2 vs the other
+                const r1 = completedPO.filter(g => g.week === 14)
+                const winners = r1.map(winnerOf)
+                const seedIndex = id => seeds.indexOf(id)
+                winners.sort((a, b) => seedIndex(a) - seedIndex(b)) // better seed first
+                inserts = [
+                  { week: 15, home_team_id: seeds[0], away_team_id: winners[1] },
+                  { week: 15, home_team_id: seeds[1], away_team_id: winners[0] },
+                ]
+              } else if (completedPO.filter(g => g.week === 15).length === 2 &&
+                         playoffGames.filter(g => g.week === 16).length === 0) {
+                // Championship (week 16)
+                const semis = completedPO.filter(g => g.week === 15)
+                inserts = [
+                  { week: 16, home_team_id: winnerOf(semis[0]), away_team_id: winnerOf(semis[1]) },
+                ]
+              } else {
+                setPoMsg({ t: 'err', v: 'Next round unlocks when the current playoff round is finalized.' })
+              }
+              if (inserts.length) {
+                const { error } = await supabase.from('matchups').insert(
+                  inserts.map(m => ({ ...m, league_id: league.id, is_playoff: true }))
+                )
+                if (error) throw error
+                setPoMsg({ t: 'ok', v: 'Playoff round generated.' })
+                await reload()
+              }
+            } catch (err) {
+              setPoMsg({ t: 'err', v: `Bracket failed: ${err.message}` })
+            }
+            setBusy(false)
+          }}>
+            Generate next playoff round
+          </button>
+        </div>
+      )}
+      {poMsg && <p className={`msg ${poMsg.t}`}>{poMsg.v}</p>}
     </div>
+  )
+}
+
+// ============================================================
+// FREE AGENTS — add/drop players not on any roster
+// ============================================================
+function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
+  const [players, setPlayers] = useState([])
+  const [rostered, setRostered] = useState(new Set())
+  const [myRoster, setMyRoster] = useState([])
+  const [search, setSearch] = useState('')
+  const [posFilter, setPosFilter] = useState('ALL')
+  const [adding, setAdding] = useState(null) // player being added (opens drop picker)
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const week = league.current_week || 1
+  const lockMs = league.lineup_lock_at ? new Date(league.lineup_lock_at).getTime() : null
+  const locked = lockMs != null && Date.now() >= lockMs
+  const canMove = !locked || isLeagueAdmin
+
+  const reload = useCallback(async () => {
+    const all = await loadAllPlayers()
+    setPlayers(all.filter(p => p.nfl_team != null || p.adp != null))
+    const { data: ro } = await supabase
+      .from('rosters').select('*')
+      .eq('league_id', league.id).eq('week', week)
+    setRostered(new Set((ro || []).map(r => r.player_id)))
+    setMyRoster((ro || []).filter(r => r.team_id === myTeamId))
+  }, [league.id, week, myTeamId])
+
+  useEffect(() => { reload() }, [reload])
+
+  const playersById = useMemo(() => Object.fromEntries(players.map(p => [p.id, p])), [players])
+
+  const pool = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return players
+      .filter(p => !rostered.has(p.id))
+      .filter(p => posFilter === 'ALL' || p.position === posFilter)
+      .filter(p => !q || p.name.toLowerCase().includes(q))
+      .slice(0, 100)
+  }, [players, rostered, posFilter, search])
+
+  const executeAddDrop = async (addPlayer, dropRow) => {
+    setBusy(true); setMsg(null)
+    try {
+      const dropped = playersById[dropRow.player_id]
+      // vacate the dropped player's slot; incoming takes it if legal, else it
+      // stays put and the lineup-legality banner on My Team flags it
+      const slot = slotAccepts(addPlayer.position, dropRow.slot) ? dropRow.slot
+        : (dropRow.slot.startsWith('BN') ? dropRow.slot : dropRow.slot)
+      const { error: delErr } = await supabase.from('rosters').delete().eq('id', dropRow.id)
+      if (delErr) throw delErr
+      const { error: insErr } = await supabase.from('rosters').insert({
+        league_id: league.id, team_id: myTeamId, player_id: addPlayer.id, slot, week,
+      })
+      if (insErr) {
+        await supabase.from('rosters').insert({
+          league_id: league.id, team_id: myTeamId, player_id: dropRow.player_id, slot: dropRow.slot, week,
+        })
+        throw insErr
+      }
+      await supabase.from('transactions').insert({
+        league_id: league.id, team_id: myTeamId, type: 'add',
+        detail: {
+          summary: `${teams.find(t => t.id === myTeamId)?.team_name || 'Team'} added ` +
+            `${addPlayer.name} (${addPlayer.position}), dropped ${dropped?.name || '?'} (${dropped?.position || '?'})`,
+        },
+      })
+      setMsg({ t: 'ok', v: `Added ${addPlayer.name}, dropped ${dropped?.name}.` })
+      setAdding(null)
+      await reload()
+    } catch (err) {
+      setMsg({ t: 'err', v: `Move failed: ${err.message}` })
+    }
+    setBusy(false)
+  }
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ fontSize: 32 }}>Free agents</h2>
+        <span className="pill active">Week {week}</span>
+      </div>
+      {!canMove && (
+        <div className="lock-banner">Lineups are locked — adds and drops reopen when the week advances.</div>
+      )}
+      <p className="sub" style={{ marginTop: 8 }}>
+        Rosters hold 16 — adding a player means dropping one. First come, first served.
+      </p>
+
+      <div className="pool-controls">
+        <input className="input" style={{ minWidth: 220 }} placeholder="Search free agents…"
+          value={search} onChange={e => setSearch(e.target.value)} />
+        {['ALL', ...FANTASY_POSITIONS].map(pos => (
+          <button key={pos} className={`chip ${posFilter === pos ? 'on' : ''}`}
+            onClick={() => setPosFilter(pos)}>{pos}</button>
+        ))}
+      </div>
+
+      <div className="pool">
+        {pool.map(p => (
+          <div key={p.id} className="pool-row">
+            <span className="pname">{p.name}</span>
+            <span className="pmeta">{p.position} · {p.nfl_team || 'FA'}</span>
+            <span className="prank">{p.last_season_avg != null ? `${p.last_season_avg} avg` : '—'}</span>
+            <span className="prank">{p.last_season_pts != null ? `${p.last_season_pts} pts` : '—'}</span>
+            <button className="btn btn-xs btn-primary" disabled={!canMove || busy}
+              onClick={() => setAdding(p)}>
+              Add
+            </button>
+          </div>
+        ))}
+        {pool.length === 0 && <div className="pool-row">No free agents match.</div>}
+      </div>
+
+      {adding && (
+        <div className="drop-picker">
+          <h3 className="display" style={{ fontSize: 20, margin: '14px 0 8px' }}>
+            Adding {adding.name} — who do you drop?
+          </h3>
+          {myRoster.map(r => {
+            const p = playersById[r.player_id]
+            return (
+              <div key={r.id} className="lineup-row tappable" onClick={() => executeAddDrop(adding, r)}>
+                <span className="lslot">{r.slot}</span>
+                <span className="lname">{p?.name || r.player_id}</span>
+                <span className="lmeta">{p?.position} · {p?.nfl_team || 'FA'}</span>
+              </div>
+            )
+          })}
+          <button className="btn btn-sm btn-ghost" onClick={() => setAdding(null)}>Cancel</button>
+        </div>
+      )}
+      {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
+    </div>
+  )
+}
+
+// ============================================================
+// TRADES — propose, accept, reject (executed by admin's client)
+// ============================================================
+function TradesPanel({ league, teams, myTeamId }) {
+  const [trades, setTrades] = useState([])
+  const [playersById, setPlayersById] = useState({})
+  const [proposing, setProposing] = useState(false)
+  const [targetTeamId, setTargetTeamId] = useState('')
+  const [myRoster, setMyRoster] = useState([])
+  const [theirRoster, setTheirRoster] = useState([])
+  const [giveIds, setGiveIds] = useState([])
+  const [getIds, setGetIds] = useState([])
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const week = league.current_week || 1
+  const teamsById = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams])
+
+  const loadTrades = useCallback(async () => {
+    const { data } = await supabase
+      .from('trades').select('*')
+      .eq('league_id', league.id)
+      .in('status', ['pending', 'accepted'])
+      .order('created_at', { ascending: false })
+    const tr = (data || []).filter(t => t.from_team_id === myTeamId || t.to_team_id === myTeamId)
+    setTrades(tr)
+    const ids = [...new Set(tr.flatMap(t => [...(t.from_player_ids || []), ...(t.to_player_ids || [])]))]
+    if (ids.length) {
+      const { data: ps } = await supabase.from('players').select('*').in('id', ids)
+      setPlayersById(prev => ({ ...prev, ...Object.fromEntries((ps || []).map(p => [p.id, p])) }))
+    }
+  }, [league.id, myTeamId])
+
+  useEffect(() => {
+    loadTrades()
+    const channel = supabase
+      .channel(`trades-panel-${league.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'trades', filter: `league_id=eq.${league.id}` },
+        loadTrades)
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [league.id, loadTrades])
+
+  const openProposal = async () => {
+    setProposing(true); setGiveIds([]); setGetIds([]); setTargetTeamId(''); setTheirRoster([])
+    const { data: ro } = await supabase
+      .from('rosters').select('*')
+      .eq('league_id', league.id).eq('team_id', myTeamId).eq('week', week)
+    setMyRoster(ro || [])
+    const ids = (ro || []).map(r => r.player_id)
+    if (ids.length) {
+      const { data: ps } = await supabase.from('players').select('*').in('id', ids)
+      setPlayersById(prev => ({ ...prev, ...Object.fromEntries((ps || []).map(p => [p.id, p])) }))
+    }
+  }
+
+  const pickTarget = async (teamId) => {
+    setTargetTeamId(teamId); setGetIds([])
+    if (!teamId) { setTheirRoster([]); return }
+    const { data: ro } = await supabase
+      .from('rosters').select('*')
+      .eq('league_id', league.id).eq('team_id', teamId).eq('week', week)
+    setTheirRoster(ro || [])
+    const ids = (ro || []).map(r => r.player_id)
+    if (ids.length) {
+      const { data: ps } = await supabase.from('players').select('*').in('id', ids)
+      setPlayersById(prev => ({ ...prev, ...Object.fromEntries((ps || []).map(p => [p.id, p])) }))
+    }
+  }
+
+  const toggle = (list, setList, pid) => {
+    setList(list.includes(pid) ? list.filter(x => x !== pid) : [...list, pid].slice(0, 3))
+  }
+
+  const submitTrade = async () => {
+    if (giveIds.length === 0 || giveIds.length !== getIds.length) {
+      setMsg({ t: 'err', v: 'Trades must be even: 1-for-1, 2-for-2, or 3-for-3.' })
+      return
+    }
+    setBusy(true); setMsg(null)
+    const { error } = await supabase.from('trades').insert({
+      league_id: league.id, from_team_id: myTeamId, to_team_id: targetTeamId,
+      from_player_ids: giveIds, to_player_ids: getIds,
+    })
+    if (error) setMsg({ t: 'err', v: error.message })
+    else { setMsg({ t: 'ok', v: 'Trade proposed — waiting on the other manager.' }); setProposing(false) }
+    setBusy(false)
+    loadTrades()
+  }
+
+  const respond = async (trade, status) => {
+    setBusy(true)
+    await supabase.from('trades').update({ status }).eq('id', trade.id)
+    setBusy(false)
+    loadTrades()
+  }
+
+  const names = ids => (ids || []).map(pid => playersById[pid]?.name || pid).join(', ')
+
+  const renderCheckList = (roster, selected, setSelected) => (
+    <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+      {roster.map(r => {
+        const p = playersById[r.player_id]
+        const on = selected.includes(r.player_id)
+        return (
+          <div key={r.id} className={`lineup-row tappable ${on ? 'sel' : ''}`}
+            onClick={() => toggle(selected, setSelected, r.player_id)}>
+            <span className="lslot">{r.slot}</span>
+            <span className="lname">{p?.name || r.player_id}</span>
+            <span className="lmeta">{p?.position} · {p?.nfl_team || 'FA'}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  return (
+    <div className="card">
+      <h2>Trades</h2>
+
+      {trades.length === 0 && !proposing && <p className="sub">No pending trades.</p>}
+
+      {trades.map(tr => {
+        const incoming = tr.to_team_id === myTeamId && tr.status === 'pending'
+        return (
+          <div key={tr.id} className="trade-row">
+            <div style={{ flex: 1 }}>
+              <b>{teamsById[tr.from_team_id]?.team_name}</b> sends <b>{names(tr.from_player_ids)}</b>
+              {' '}to <b>{teamsById[tr.to_team_id]?.team_name}</b> for <b>{names(tr.to_player_ids)}</b>
+              <div className="bp-meta">
+                {tr.status === 'accepted' ? 'Accepted — commissioner processing…' : incoming ? 'Awaiting your response' : 'Awaiting their response'}
+              </div>
+            </div>
+            {incoming && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-xs btn-turf" disabled={busy} onClick={() => respond(tr, 'accepted')}>Accept</button>
+                <button className="btn btn-xs" disabled={busy} onClick={() => respond(tr, 'rejected')}>Reject</button>
+              </div>
+            )}
+            {tr.from_team_id === myTeamId && tr.status === 'pending' && (
+              <button className="btn btn-xs" disabled={busy} onClick={() => respond(tr, 'cancelled')}>Cancel</button>
+            )}
+          </div>
+        )
+      })}
+
+      {!proposing ? (
+        <div className="admin-actions">
+          <button className="btn btn-sm" onClick={openProposal}>Propose a trade</button>
+        </div>
+      ) : (
+        <>
+          <hr className="divider" />
+          <div className="field" style={{ marginBottom: 10 }}>
+            <select className="input" value={targetTeamId} onChange={e => pickTarget(e.target.value)}>
+              <option value="">Choose a team to trade with…</option>
+              {teams.filter(t => t.id !== myTeamId).map(t => (
+                <option key={t.id} value={t.id}>{t.team_name} ({t.user_name})</option>
+              ))}
+            </select>
+          </div>
+          {targetTeamId && (
+            <div className="trade-grid">
+              <div>
+                <p className="adv-label">You send (tap to select, max 3)</p>
+                {renderCheckList(myRoster, giveIds, setGiveIds)}
+              </div>
+              <div>
+                <p className="adv-label">You receive (must match count)</p>
+                {renderCheckList(theirRoster, getIds, setGetIds)}
+              </div>
+            </div>
+          )}
+          <div className="admin-actions" style={{ marginTop: 10 }}>
+            <button className="btn btn-sm btn-primary" disabled={busy || !targetTeamId} onClick={submitTrade}>
+              Send trade offer ({giveIds.length}-for-{getIds.length})
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={() => setProposing(false)}>Cancel</button>
+          </div>
+        </>
+      )}
+      {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
+    </div>
+  )
+}
+
+// ============================================================
+// TRANSACTIONS FEED — recent league activity on the home page
+// ============================================================
+function TransactionsFeed({ league }) {
+  const [txns, setTxns] = useState([])
+
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      const { data } = await supabase
+        .from('transactions').select('*')
+        .eq('league_id', league.id)
+        .order('created_at', { ascending: false })
+        .limit(12)
+      if (mounted) setTxns(data || [])
+    }
+    load()
+    const channel = supabase
+      .channel(`txns-${league.id}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'transactions', filter: `league_id=eq.${league.id}` },
+        load)
+      .subscribe()
+    return () => { mounted = false; supabase.removeChannel(channel) }
+  }, [league.id])
+
+  if (txns.length === 0) return null
+  return (
+    <>
+      <hr className="divider" />
+      <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Recent moves</h3>
+      {txns.map(t => (
+        <div key={t.id} className="txn-row">
+          {t.detail?.summary || t.type}
+          <span className="when"> · {new Date(t.created_at).toLocaleDateString()}</span>
+        </div>
+      ))}
+    </>
   )
 }
