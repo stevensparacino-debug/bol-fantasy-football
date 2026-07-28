@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v3.2' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v3.3' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -573,6 +573,49 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   const [league, setLeague] = useState(initialLeague)
   const [teams, setTeams] = useState([])
   const [tab, setTab] = useState('home')
+  const finalizedRef = useRef(false)
+
+  // Self-healing roster finalizer: whenever the admin loads an ACTIVE league
+  // whose week-1 rosters are missing, rebuild them from the draft picks.
+  // (Lives here — not in DraftRoom — because DraftRoom unmounts the instant
+  // the final pick flips the league to 'active'.)
+  useEffect(() => {
+    if (!league || league.status !== 'active' || teams.length === 0) return
+    const amAdmin = isAdmin || league.admin_id === session.user.id
+    if (!amAdmin || finalizedRef.current) return
+    ;(async () => {
+      const { count } = await supabase
+        .from('rosters').select('id', { count: 'exact', head: true })
+        .eq('league_id', league.id).eq('week', 1)
+      if ((count || 0) > 0) { finalizedRef.current = true; return }
+      const { data: picks } = await supabase
+        .from('draft_picks').select('*').eq('league_id', league.id)
+      if (!picks || picks.length === 0) return
+      finalizedRef.current = true
+      // fetch drafted players (in chunks — .in() has practical size limits)
+      const ids = [...new Set(picks.map(p => p.player_id))]
+      const playersById = {}
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: ps } = await supabase
+          .from('players').select('*').in('id', ids.slice(i, i + 300))
+        ;(ps || []).forEach(p => { playersById[p.id] = p })
+      }
+      const rows = []
+      teams.forEach(team => {
+        const teamPlayers = picks
+          .filter(p => p.team_id === team.id)
+          .map(p => playersById[p.player_id])
+          .filter(Boolean)
+          .sort((a, b) => (a.adp ?? 1e9) - (b.adp ?? 1e9))
+        autoAssignSlots(teamPlayers).forEach(({ player_id, slot }) => {
+          rows.push({ league_id: league.id, team_id: team.id, player_id, slot, week: 1 })
+        })
+      })
+      for (let i = 0; i < rows.length; i += 200) {
+        await supabase.from('rosters').insert(rows.slice(i, i + 200))
+      }
+    })()
+  }, [league?.status, league?.id, teams.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let mounted = true
@@ -1185,33 +1228,8 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     }
   }
 
-  // ---- finalize: write week-1 rosters when draft completes (admin client, once) ----
-  const finalized = useRef(false)
-  useEffect(() => {
-    if (!draftDone || !isLeagueAdmin || finalized.current) return
-    if (picks.length < totalPicks) return
-    finalized.current = true
-    ;(async () => {
-      const { count } = await supabase
-        .from('rosters').select('id', { count: 'exact', head: true })
-        .eq('league_id', league.id).eq('week', 1)
-      if ((count || 0) > 0) return // already finalized by another session
-      const rows = []
-      teams.forEach(team => {
-        const teamPlayers = picks
-          .filter(p => p.team_id === team.id)
-          .map(p => playersById[p.player_id])
-          .filter(Boolean)
-          .sort((a, b) => (a.adp ?? 1e9) - (b.adp ?? 1e9))
-        autoAssignSlots(teamPlayers).forEach(({ player_id, slot }) => {
-          rows.push({ league_id: league.id, team_id: team.id, player_id, slot, week: 1 })
-        })
-      })
-      for (let i = 0; i < rows.length; i += 200) {
-        await supabase.from('rosters').insert(rows.slice(i, i + 200))
-      }
-    })()
-  }, [draftDone, isLeagueAdmin, picks, totalPicks, teams, league.id, playersById])
+  // (Roster finalization moved to LeagueView — it must survive this
+  //  component unmounting when the league flips to 'active'.)
 
   // ---- pool filtering ----
   const pool = useMemo(() => {
@@ -1459,6 +1477,18 @@ function TeamPage({ league, teams, myTeamId, isLeagueAdmin }) {
   }, [league.id, myTeamId, week])
 
   useEffect(() => { loadRoster() }, [loadRoster])
+
+  // If the roster is empty, the finalizer may still be writing — retry briefly.
+  useEffect(() => {
+    if (roster.length > 0) return
+    let tries = 0
+    const t = setInterval(() => {
+      tries += 1
+      if (tries > 6) { clearInterval(t); return }
+      loadRoster()
+    }, 2000)
+    return () => clearInterval(t)
+  }, [roster.length, loadRoster])
 
   // Projections for this week (fetched live from Sleeper, half-PPR)
   useEffect(() => {
