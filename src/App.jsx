@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v4.4' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v4.5' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -2237,11 +2237,21 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
             </span>
           </div>
           <div style={{ textAlign: 'right', fontSize: 12, opacity: 0.6 }}>
-            {lastFetch ? `Stats updated ${lastFetch.toLocaleTimeString()}` : 'Fetching stats…'}
+            {lastFetch
+              ? `Stats updated ${lastFetch.toLocaleTimeString()} · ${Object.keys(stats).length} stat lines`
+              : 'Fetching stats…'}
             <br />auto-refreshes every 60s
             {sim && simF < 1 && <><br /><b>SIMULATING: {Math.round(simF * 100)}% of game time</b></>}
           </div>
         </div>
+
+        {Object.keys(stats).length === 0 && lastFetch && (
+          <div className="lock-banner" style={{ background: 'var(--mock)' }}>
+            No stats exist for {statsYear} week {statsWeek} — {statsYear >= CURRENT_SEASON
+              ? 'that week hasn\u2019t been played yet. Set a 2025 mock week in Commissioner Controls to test with real data.'
+              : 'check the week number.'}
+          </div>
+        )}
 
         {matchups.length === 0 ? (
           <>
