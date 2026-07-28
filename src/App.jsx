@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v3.0' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v3.2' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -235,6 +235,27 @@ body { font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; 
 .lock-banner {
   margin-top: 12px; padding: 10px 14px; border-radius: 8px;
   background: var(--orange); color: var(--chalk); font-weight: 700; font-size: 14px;
+}
+
+/* ---------- Draft advisor ---------- */
+.advisor { border-color: var(--turf); }
+.adv-ok { font-size: 13px; font-weight: 700; color: var(--turf); }
+.adv-need { font-size: 13px; font-weight: 700; }
+.adv-need.urgent { color: #B3261E; }
+.adv-sub { font-weight: 400; opacity: 0.6; }
+.adv-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin: 10px 0 6px; opacity: 0.6; }
+.adv-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.adv-row:last-child { border-bottom: none; }
+.adv-name { font-weight: 700; flex: 1; }
+.adv-meta { font-size: 11px; opacity: 0.6; }
+.adv-why { font-size: 11px; color: var(--turf); font-weight: 700; }
+
+/* ---------- Coach ---------- */
+.coach { border-color: var(--orange); }
+.coach-say {
+  margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+  background: var(--cream); border: 2px dashed var(--orange);
+  font-size: 13px; line-height: 1.5; white-space: pre-wrap;
 }
 
 @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
@@ -1035,6 +1056,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   const [posFilter, setPosFilter] = useState('ALL')
   const [now, setNow] = useState(Date.now())
   const [busyPick, setBusyPick] = useState(false)
+  const [fastBots, setFastBots] = useState(false) // mock-only: bots pick every 200ms
   const firedForPick = useRef({ pick: -1, at: 0 }) // guards duplicate autopick/bot fires per pick number
 
   const numTeams = league.draft_order?.length || teams.length
@@ -1139,7 +1161,8 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     const iDrive = isLeagueAdmin || onClockIsMe
     if (!iDrive) return
     const pickStartMs = deadlineMs - DRAFT_PICK_TIMER * 1000
-    const botDueMs = isMock && onClockIsBot ? pickStartMs + BOT_PICK_DELAY_MS : Infinity
+    const botDelay = fastBots ? 200 : BOT_PICK_DELAY_MS
+    const botDueMs = isMock && onClockIsBot ? pickStartMs + botDelay : Infinity
     const expired = now >= deadlineMs + 500
     if (!expired && now < botDueMs) return
     // fire at most once per pick per 3s window (retry if the pick didn't advance)
@@ -1148,7 +1171,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     firedForPick.current = { pick: currentPick, at: now }
     doAutoPick()
   }, [now, deadlineMs, draftDone, league.paused, onClockTeamId, players.length, busyPick,
-      isLeagueAdmin, onClockIsMe, onClockIsBot, isMock, currentPick, doAutoPick])
+      isLeagueAdmin, onClockIsMe, onClockIsBot, isMock, currentPick, doAutoPick, fastBots])
 
   // ---- pause / resume (admin) ----
   const togglePause = async () => {
@@ -1211,7 +1234,13 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   return (
     <>
       {isMock && (
-        <div className="mock-banner">MOCK DRAFT — bots autopick their turns. You're {teamsById[myTeamId]?.team_name}.</div>
+        <div className="mock-banner" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span>MOCK DRAFT — bots autopick their turns. You're {teamsById[myTeamId]?.team_name}.</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 700 }}>
+            <input type="checkbox" checked={fastBots} onChange={e => setFastBots(e.target.checked)} />
+            Fast-forward bots
+          </label>
+        </div>
       )}
 
       <div className="draft-topbar">
@@ -1278,6 +1307,33 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
         </div>
 
         <div>
+          <DraftAdvisor
+            myPicks={myPicks}
+            players={players}
+            draftedSet={draftedSet}
+            picksRemaining={TOTAL_ROUNDS - myPicks.length}
+          />
+          <CoachCard buildContext={() => {
+            const myByPos = {}
+            myPicks.forEach(p => { myByPos[p.position] = [...(myByPos[p.position] || []), p.name] })
+            const rosterStr = FANTASY_POSITIONS
+              .map(pos => `${pos}: ${(myByPos[pos] || []).join(', ') || 'none'}`).join('\n')
+            const avail = players.filter(p => !draftedSet.has(p.id) && p.adp != null).slice(0, 15)
+            const availStr = avail.map(p =>
+              `${p.name} (${p.position} ${p.nfl_team || 'FA'}, rank #${p.adp}` +
+              `${p.last_season_avg != null ? `, 2025 avg ${p.last_season_avg}` : ''})`
+            ).join('\n')
+            const recent = [...picks].slice(-6).map(p =>
+              `#${p.pick_number} ${teamsById[p.team_id]?.team_name}: ` +
+              `${playersById[p.player_id]?.name || '?'} (${playersById[p.player_id]?.position || '?'})`
+            ).join('\n')
+            return `Round ${round} of ${TOTAL_ROUNDS}, overall pick ${currentPick + 1}/${totalPicks}. ` +
+              `My picks remaining: ${TOTAL_ROUNDS - myPicks.length}.\n` +
+              `${onClockIsMe ? 'I AM ON THE CLOCK RIGHT NOW.' : `On the clock: ${onClockTeam?.team_name || 'n/a'}`}\n\n` +
+              `MY ROSTER SO FAR:\n${rosterStr}\n\n` +
+              `TOP AVAILABLE PLAYERS (by rank):\n${availStr}\n\n` +
+              `LAST FEW PICKS:\n${recent || 'none yet'}`
+          }} />
           <div className="side-card">
             <h3>Recent picks</h3>
             <div className="feed">
@@ -1561,5 +1617,121 @@ function TeamPage({ league, teams, myTeamId, isLeagueAdmin }) {
         {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
       </div>
     </>
+  )
+}
+
+// ============================================================
+// DRAFT ADVISOR — flags roster gaps and recommends picks
+// ============================================================
+function DraftAdvisor({ myPicks, players, draftedSet, picksRemaining }) {
+  const counts = {}
+  myPicks.forEach(p => { counts[p.position] = (counts[p.position] || 0) + 1 })
+
+  // Required starters: 1 QB, 2 RB, 2 WR, 1 TE, 1 K, 1 DEF (+1 FLEX from RB/WR/TE)
+  const REQ = { QB: 1, RB: 2, WR: 2, TE: 1, K: 1, DEF: 1 }
+  const missing = []
+  Object.entries(REQ).forEach(([pos, n]) => {
+    const gap = n - (counts[pos] || 0)
+    for (let i = 0; i < gap; i++) missing.push(pos)
+  })
+  const skillCount = (counts.RB || 0) + (counts.WR || 0) + (counts.TE || 0)
+  const skillReqMet = (counts.RB || 0) >= 2 && (counts.WR || 0) >= 2 && (counts.TE || 0) >= 1
+  if (skillReqMet && skillCount < 6) missing.push('FLEX')
+
+  const urgent = missing.length >= picksRemaining && missing.length > 0
+  const distinctNeeds = [...new Set(missing.map(m => m === 'FLEX' ? null : m).filter(Boolean))]
+
+  // Best available: at needed positions first, otherwise overall
+  const avail = players.filter(p => !draftedSet.has(p.id) && p.adp != null)
+  const suggestions = []
+  distinctNeeds.slice(0, 3).forEach(pos => {
+    const best = avail.find(p => p.position === pos)
+    if (best) suggestions.push({ ...best, why: `fills ${pos}` })
+  })
+  if (suggestions.length < 3) {
+    for (const p of avail) {
+      if (suggestions.length >= 3) break
+      if (!suggestions.some(s => s.id === p.id)) {
+        suggestions.push({ ...p, why: 'best available' })
+      }
+    }
+  }
+
+  // Summarize needs like "RB ×2, TE, K"
+  const needSummary = Object.entries(
+    missing.reduce((acc, m) => ({ ...acc, [m]: (acc[m] || 0) + 1 }), {})
+  ).map(([pos, n]) => n > 1 ? `${pos} ×${n}` : pos).join(', ')
+
+  return (
+    <div className="side-card advisor">
+      <h3>Draft advisor</h3>
+      {missing.length === 0 ? (
+        <p className="adv-ok">✓ All starting slots covered — draft best available for depth.</p>
+      ) : (
+        <p className={`adv-need ${urgent ? 'urgent' : ''}`}>
+          {urgent ? '⚠ MUST FILL: ' : 'Still needed: '}{needSummary}
+          <span className="adv-sub"> · {picksRemaining} pick{picksRemaining === 1 ? '' : 's'} left</span>
+        </p>
+      )}
+      {suggestions.length > 0 && (
+        <>
+          <p className="adv-label">Suggested picks</p>
+          {suggestions.map(s => (
+            <div key={s.id} className="adv-row">
+              <span className="adv-name">{s.name}</span>
+              <span className="adv-meta">{s.position} · {s.nfl_team || 'FA'}</span>
+              <span className="adv-why">{s.why}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// COACH SUNDAY — Claude-powered draft guru (via Supabase Edge Function)
+// ============================================================
+function CoachCard({ buildContext }) {
+  const [q, setQ] = useState('')
+  const [resp, setResp] = useState(null)
+  const [err, setErr] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const ask = async () => {
+    if (loading) return
+    setLoading(true); setErr(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('draft-guru', {
+        body: { context: buildContext(), question: q },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      setResp(data?.text || 'Coach went quiet — try again.')
+    } catch (e) {
+      setErr(`Coach is off the air: ${e.message}`)
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div className="side-card coach">
+      <h3>🏈 Coach Sunday</h3>
+      <p className="sub" style={{ marginBottom: 8 }}>Your AI draft guru. He reads the board — ask him anything.</p>
+      <div className="field" style={{ marginBottom: 8 }}>
+        <input
+          className="input" style={{ minWidth: 0, fontSize: 13, padding: '8px 10px' }}
+          placeholder="Optional question… (or just ask for the call)"
+          maxLength={300}
+          value={q} onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') ask() }}
+        />
+      </div>
+      <button className="btn btn-sm btn-turf" disabled={loading} onClick={ask}>
+        {loading ? 'Coach is thinking…' : "What's the call, Coach?"}
+      </button>
+      {resp && <div className="coach-say">{resp}</div>}
+      {err && <p className="msg err">{err}</p>}
+    </div>
   )
 }
