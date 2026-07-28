@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from './supabase'
 
 // ============================================================
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v6.1' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v7.0' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -429,6 +429,103 @@ select.input { appearance: none; }
 ::-webkit-scrollbar-track { background: var(--surface); }
 ::-webkit-scrollbar-thumb { background: var(--raise); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+
+/* ---------- Kit: draft command bar ---------- */
+.dt-cell { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
+.dt-grow { flex: 1; min-width: 160px; }
+.dt-label {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.16em; color: var(--faint);
+}
+.dt-big {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  font-size: 34px; line-height: 1; color: var(--orange); font-variant-numeric: tabular-nums;
+}
+.dt-team { font-weight: 700; font-size: 16px; }
+.dt-sub { font-size: 11px; color: var(--muted); }
+.dt-upnext { min-width: 150px; }
+
+/* ---------- Kit: draft board card grid ---------- */
+.bb-legend { display: flex; gap: 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; color: var(--muted); margin-top: 4px; }
+.bb-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.pos-sw-QB { background: var(--orange); } .pos-sw-RB { background: var(--cyan); }
+.pos-sw-WR { background: var(--lime); } .pos-sw-TE { background: var(--magenta); }
+.pos-sw-K { background: var(--yellow); } .pos-sw-DEF { background: var(--faint); }
+.bb-grid { display: grid; gap: 4px; margin-top: 14px; min-width: 1200px; }
+.bb-head {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; text-transform: uppercase;
+  font-size: 10px; letter-spacing: 0.08em; color: var(--muted);
+  padding: 6px 4px; text-align: center; line-height: 1.25;
+  border-bottom: 1px solid var(--line-strong);
+}
+.bb-rnd {
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 12px; color: var(--faint);
+}
+.bb-cell {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  border-top: 3px solid transparent; padding: 7px 8px; min-height: 52px;
+}
+.bb-cell.bb-filled.pos-QB { border-top-color: var(--orange); border-left-color: var(--line); }
+.bb-cell.bb-filled.pos-RB { border-top-color: var(--cyan); border-left-color: var(--line); }
+.bb-cell.bb-filled.pos-WR { border-top-color: var(--lime); border-left-color: var(--line); }
+.bb-cell.bb-filled.pos-TE { border-top-color: var(--magenta); border-left-color: var(--line); }
+.bb-cell.bb-filled.pos-K { border-top-color: var(--yellow); border-left-color: var(--line); }
+.bb-cell.bb-filled.pos-DEF { border-top-color: var(--faint); border-left-color: var(--line); }
+.bb-cell.bb-filled { background: var(--card); }
+.bb-cell.bb-live { border-color: var(--orange); background: rgba(248,94,50,0.10); }
+.bb-name { font-weight: 700; font-size: 11px; line-height: 1.25; }
+.bb-meta { font-size: 9px; color: var(--faint); margin-top: 2px; letter-spacing: 0.02em; }
+
+/* ---------- Kit: dashboard hero ---------- */
+.hero-card { border-left: 4px solid var(--orange); }
+.hero-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+.hero-grid { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: center; }
+.hero-side.away { text-align: right; }
+.hero-team { font-weight: 700; font-size: 16px; }
+.hero-mgr { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.hero-score {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  font-size: 44px; line-height: 1.05; color: var(--cyan); font-variant-numeric: tabular-nums;
+}
+.hero-proj { font-size: 11px; color: var(--faint); font-weight: 700; letter-spacing: 0.06em; }
+.hero-mid { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 90px; }
+.winbar { width: 90px; height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; }
+.winbar-fill { height: 100%; background: var(--lime); }
+.hero-win { font-size: 10px; font-weight: 700; color: var(--lime); letter-spacing: 0.1em; }
+
+.alert-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 14px; padding: 10px 12px; border-radius: 6px; font-size: 12px;
+  background: rgba(248,94,50,0.12); border: 1px solid var(--orange); color: var(--orange-soft);
+}
+.alert-banner b { letter-spacing: 0.1em; }
+
+.stat-strip {
+  display: flex; gap: 0; margin-top: 14px;
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+}
+.stat-strip > div {
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 12px; background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+.stat-strip > div:last-child { border-right: none; }
+.stat-strip b {
+  font-family: 'Archivo Narrow', sans-serif; font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Kit: team page table ---------- */
+.tp-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+.tp-thead {
+  display: flex; align-items: center; gap: 12px; padding: 4px 12px 8px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.14em; color: var(--faint);
+}
+.tp-col { font-size: 12px; min-width: 44px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tp-pts { color: var(--cyan); font-weight: 700; }
 
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
@@ -1124,7 +1221,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           isMock={isMock}
         />
       ) : active && tab === 'team' ? (
-        <TeamPage
+        <TeamPage2
           league={league}
           teams={teams}
           myTeamId={myTeamId}
@@ -1157,6 +1254,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           onEnterMock={onEnterMock}
           onExitMock={onExitMock}
           reloadTop={reloadTop}
+          setTab={setTab}
         />
       )}
     </>
@@ -1166,9 +1264,12 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 // ============================================================
 // LEAGUE HOME
 // ============================================================
-function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, onEnterMock, onExitMock, reloadTop }) {
+function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, onEnterMock, onExitMock, reloadTop, setTab }) {
   return (
     <>
+      {league.status === 'active' && (
+        <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} />
+      )}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
@@ -1847,31 +1948,53 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
       )}
 
       <div className="draft-topbar">
-        <div>
-          <div className="roundinfo">
-            {draftDone ? 'DRAFT COMPLETE' : `ROUND ${round} · PICK ${pickInRound} (${currentPick + 1}/${totalPicks})`}
-          </div>
-          {!draftDone && onClockTeam && (
-            <div className="onclock">
-              ON THE CLOCK: <b>{onClockTeam.team_name}</b>
-              {onClockIsMe && ' — that\u2019s you!'}
-              {league.paused && ' · PAUSED'}
-            </div>
-          )}
-          {draftDone && <div className="onclock">Rosters are being finalized — head back to the league page.</div>}
+        <div className="dt-cell">
+          <span className="dt-label">Pick</span>
+          <span className="dt-big">{draftDone ? '—' : `${round}.${String(pickInRound).padStart(2, '0')}`}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="dt-cell dt-grow">
+          <span className="dt-label">On the clock</span>
+          {draftDone ? (
+            <span className="dt-team">Draft complete</span>
+          ) : (
+            <>
+              <span className="dt-team">{onClockTeam?.team_name || '—'}{onClockIsMe && ' · YOU'}</span>
+              <span className="dt-sub">
+                {onClockTeam?.user_name}{league.paused ? ' · PAUSED' : ''}
+              </span>
+            </>
+          )}
+        </div>
+        <div className="dt-cell">
+          <span className="dt-label">Time remaining</span>
           {!draftDone && (
             <div className={`clock ${league.paused ? 'paused' : ''} ${secondsLeft != null && secondsLeft <= 10 ? 'warn' : ''}`}>
               {league.paused ? '⏸' : secondsLeft != null ? `:${String(secondsLeft).padStart(2, '0')}` : '--'}
             </div>
           )}
-          {isLeagueAdmin && !draftDone && (
-            <button className="btn btn-sm" onClick={togglePause}>
-              {league.paused ? 'Resume draft' : 'Pause draft'}
-            </button>
-          )}
+          {!draftDone && <span className="dt-sub">of 1:{String(DRAFT_PICK_TIMER % 60).padStart(2, '0')}</span>}
         </div>
+        <div className="dt-cell dt-upnext">
+          <span className="dt-label">Up next</span>
+          {!draftDone && Array.from({ length: 3 }).map((_, i) => {
+            const n = currentPick + 1 + i
+            if (n >= totalPicks) return null
+            const tid = league.draft_order[slotForPick(n, numTeams)]
+            const r = Math.floor(n / numTeams) + 1
+            const pr = (n % numTeams) + 1
+            return (
+              <span key={n} className="dt-sub">
+                {r}.{String(pr).padStart(2, '0')} {teamsById[tid]?.team_name}{tid === myTeamId ? ' · your turn' : ''}
+              </span>
+            )
+          })}
+          {draftDone && <span className="dt-sub">Rosters finalizing…</span>}
+        </div>
+        {isLeagueAdmin && !draftDone && (
+          <button className="btn btn-sm" onClick={togglePause}>
+            {league.paused ? 'Resume draft' : 'Pause draft'}
+          </button>
+        )}
       </div>
 
       <div className="draft-layout">
@@ -1962,7 +2085,10 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
         </div>
       </div>
 
-      <DraftBoard league={league} teams={teams} picks={picks} playersById={playersById} numTeams={numTeams} />
+      <DraftBoardGrid
+        league={league} teams={teams} picks={picks} playersById={playersById}
+        numTeams={numTeams} currentPick={currentPick} secondsLeft={secondsLeft} draftDone={draftDone}
+      />
     </>
   )
 }
@@ -2614,39 +2740,56 @@ function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
 
   const rows = useMemo(() => {
     const rec = {}
-    teams.forEach(t => { rec[t.id] = { team: t, w: 0, l: 0, t: 0, pf: 0, pa: 0 } })
-    matchups.forEach(m => {
+    teams.forEach(t => { rec[t.id] = { team: t, w: 0, l: 0, t: 0, pf: 0, pa: 0, seq: [] } })
+    ;[...matchups].sort((a, b) => a.week - b.week).forEach(m => {
       const h = rec[m.home_team_id], a = rec[m.away_team_id]
       if (!h || !a) return
       h.pf += m.home_score; h.pa += m.away_score
       a.pf += m.away_score; a.pa += m.home_score
-      if (m.home_score > m.away_score) { h.w++; a.l++ }
-      else if (m.away_score > m.home_score) { a.w++; h.l++ }
-      else { h.t++; a.t++ }
+      if (m.home_score > m.away_score) { h.w++; a.l++; h.seq.push('W'); a.seq.push('L') }
+      else if (m.away_score > m.home_score) { a.w++; h.l++; a.seq.push('W'); h.seq.push('L') }
+      else { h.t++; a.t++; h.seq.push('T'); a.seq.push('T') }
     })
-    return Object.values(rec).sort((x, y) =>
-      (y.w - x.w) || (y.pf - x.pf) // wins, then points-for (league tiebreaker)
-    )
+    const streak = seq => {
+      if (!seq.length) return '—'
+      const last = seq[seq.length - 1]
+      let n = 0
+      for (let i = seq.length - 1; i >= 0 && seq[i] === last; i--) n++
+      return `${last}${n}`
+    }
+    return Object.values(rec)
+      .map(r => ({ ...r, stk: streak(r.seq) }))
+      .sort((x, y) => (y.w - x.w) || (y.pf - x.pf)) // wins, then points-for (league tiebreaker)
   }, [teams, matchups])
 
   return (
     <div className="card">
       <h2>Standings</h2>
       <p className="sub">Ranked by record, ties broken by points for. Top 6 make the playoffs (weeks 14-17).</p>
+      <p className="adv-label" style={{ marginTop: 4 }}>Playoff seeds 1–6</p>
       <div className="board-scroll">
         <table className="board" style={{ minWidth: 560 }}>
           <thead>
-            <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th></tr>
+            <tr><th>#</th><th>Team</th><th>W-L</th><th>PF</th><th>PA</th><th>STK</th></tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={r.team.id} style={r.team.id === myTeamId ? { background: 'rgba(248,94,50,0.10)' } : undefined}>
-                <td className="rnd">{i + 1}</td>
-                <td className="filled"><span className="bp-name">{r.team.team_name}</span>
-                  <div className="bp-meta">{r.team.user_name}{i < 6 ? ' · playoff spot' : ''}</div></td>
-                <td>{r.w}</td><td>{r.l}</td><td>{r.t}</td>
-                <td>{Math.round(r.pf * 10) / 10}</td><td>{Math.round(r.pa * 10) / 10}</td>
-              </tr>
+              <React.Fragment key={r.team.id}>
+                {i === 6 && (
+                  <tr><td colSpan={6} style={{ padding: '8px', border: 'none' }}>
+                    <span className="adv-label" style={{ margin: 0 }}>In the hunt</span>
+                  </td></tr>
+                )}
+                <tr style={r.team.id === myTeamId ? { background: 'rgba(248,94,50,0.10)' } : undefined}>
+                  <td className="rnd">{i + 1}</td>
+                  <td className="filled"><span className="bp-name">{r.team.team_name}</span>
+                    <div className="bp-meta">{(r.team.user_name || '').toUpperCase()}{r.team.id === myTeamId ? ' · YOUR TEAM' : ''}</div></td>
+                  <td>{r.w}-{r.l}{r.t > 0 ? `-${r.t}` : ''}</td>
+                  <td>{(Math.round(r.pf * 10) / 10).toFixed(1)}</td>
+                  <td>{(Math.round(r.pa * 10) / 10).toFixed(1)}</td>
+                  <td>{r.stk}</td>
+                </tr>
+              </React.Fragment>
             ))}
           </tbody>
         </table>
@@ -2753,9 +2896,21 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
   const locked = lockMs != null && Date.now() >= lockMs
   const canMove = !locked || isLeagueAdmin
 
+  const [faProj, setFaProj] = useState({})
   const reload = useCallback(async () => {
     const all = await loadAllPlayers()
     setPlayers(all.filter(p => p.nfl_team != null || p.adp != null))
+    try {
+      const res = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
+      if (res.ok) {
+        const map = {}
+        Object.entries(normalizeSleeperStats(await res.json())).forEach(([pid, s]) => {
+          const pts = s?.pts_half_ppr ?? s?.pts_std
+          if (typeof pts === 'number') map[pid] = Math.round(pts * 10) / 10
+        })
+        setFaProj(map)
+      }
+    } catch { /* fine */ }
     const { data: ro } = await supabase
       .from('rosters').select('*')
       .eq('league_id', league.id).eq('week', week)
@@ -2825,7 +2980,8 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
       </p>
 
       <div className="pool-controls">
-        <input className="input" style={{ minWidth: 220 }} placeholder="Search free agents…"
+        <input className="input" style={{ minWidth: 220 }}
+          placeholder={`Search ${players.filter(p => !rostered.has(p.id)).length} available players…`}
           value={search} onChange={e => setSearch(e.target.value)} />
         {['ALL', ...FANTASY_POSITIONS].map(pos => (
           <button key={pos} className={`chip ${posFilter === pos ? 'on' : ''}`}
@@ -2838,11 +2994,11 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
           <div key={p.id} className={`pool-row pos-${p.position}`}>
             <span className="pname">{p.name}</span>
             <span className="pmeta">{p.position} · {p.nfl_team || 'FA'}</span>
-            <span className="prank">{p.last_season_avg != null ? `${p.last_season_avg} avg` : '—'}</span>
-            <span className="prank">{p.last_season_pts != null ? `${p.last_season_pts} pts` : '—'}</span>
+            <span className="prank" title="This week's projection">{faProj[p.id] != null ? `${faProj[p.id]} proj` : '—'}</span>
+            <span className="prank" title="2025 avg/game">{p.last_season_avg != null ? `${p.last_season_avg} avg` : '—'}</span>
             <button className="btn btn-xs btn-primary" disabled={!canMove || busy}
               onClick={() => setAdding(p)}>
-              Add
+              ADD
             </button>
           </div>
         ))}
@@ -3037,18 +3193,24 @@ function TradesPanel({ league, teams, myTeamId }) {
           {targetTeamId && (
             <div className="trade-grid">
               <div>
-                <p className="adv-label">You send (tap to select, max 3)</p>
+                <p className="adv-label">
+                  You send · {giveIds.length} player{giveIds.length === 1 ? '' : 's'} ·{' '}
+                  {(giveIds.reduce((s, pid) => s + (playersById[pid]?.last_season_avg || 0), 0)).toFixed(1)} PPG
+                </p>
                 {renderCheckList(myRoster, giveIds, setGiveIds)}
               </div>
               <div>
-                <p className="adv-label">You receive (must match count)</p>
+                <p className="adv-label">
+                  You receive · {getIds.length} player{getIds.length === 1 ? '' : 's'} ·{' '}
+                  {(getIds.reduce((s, pid) => s + (playersById[pid]?.last_season_avg || 0), 0)).toFixed(1)} PPG
+                </p>
                 {renderCheckList(theirRoster, getIds, setGetIds)}
               </div>
             </div>
           )}
           <div className="admin-actions" style={{ marginTop: 10 }}>
             <button className="btn btn-sm btn-primary" disabled={busy || !targetTeamId} onClick={submitTrade}>
-              Send trade offer ({giveIds.length}-for-{getIds.length})
+              SEND PROPOSAL ({giveIds.length}-for-{getIds.length})
             </button>
             <button className="btn btn-sm btn-ghost" onClick={() => setProposing(false)}>Cancel</button>
           </div>
@@ -3096,6 +3258,577 @@ function TransactionsFeed({ league }) {
           <span className="when"> · {new Date(t.created_at).toLocaleDateString()}</span>
         </div>
       ))}
+    </>
+  )
+}
+
+// ============================================================
+// DRAFT BOARD GRID — kit-style card grid (teams × rounds)
+// ============================================================
+function DraftBoardGrid({ league, teams, picks, playersById, numTeams, currentPick, secondsLeft, draftDone }) {
+  const [open, setOpen] = useState(true)
+  const teamsById = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams])
+  const order = league.draft_order || teams.map(t => t.id)
+  const picksByNumber = useMemo(
+    () => Object.fromEntries(picks.map(p => [p.pick_number, p])), [picks])
+
+  return (
+    <div className="card" style={{ marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h2 style={{ marginBottom: 2 }}>Draft board</h2>
+          <div className="bb-legend">
+            <span><i className="sw pos-sw-RB" />RB</span>
+            <span><i className="sw pos-sw-WR" />WR</span>
+            <span><i className="sw pos-sw-QB" />QB</span>
+            <span><i className="sw pos-sw-TE" />TE</span>
+            <span><i className="sw pos-sw-K" />K</span>
+            <span><i className="sw pos-sw-DEF" />DST</span>
+          </div>
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show'}</button>
+      </div>
+      {open && (
+        <div className="board-scroll">
+          <div className="bb-grid" style={{ gridTemplateColumns: `34px repeat(${order.length}, minmax(104px, 1fr))` }}>
+            <div className="bb-head bb-rnd" />
+            {order.map(id => (
+              <div key={`h-${id}`} className="bb-head">{teamsById[id]?.team_name || '?'}</div>
+            ))}
+            {Array.from({ length: TOTAL_ROUNDS }).map((_, r) => (
+              <FragmentRow key={r} r={r} order={order} numTeams={numTeams}
+                picksByNumber={picksByNumber} playersById={playersById}
+                currentPick={currentPick} secondsLeft={secondsLeft} draftDone={draftDone} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FragmentRow({ r, order, numTeams, picksByNumber, playersById, currentPick, secondsLeft, draftDone }) {
+  return (
+    <>
+      <div className="bb-rnd">{r + 1}</div>
+      {order.map((teamId, col) => {
+        const idxInRound = r % 2 === 0 ? col : numTeams - 1 - col
+        const overallIdx = r * numTeams + idxInRound        // 0-indexed
+        const overall = overallIdx + 1                       // 1-indexed pick_number
+        const pick = picksByNumber[overall]
+        const player = pick ? playersById[pick.player_id] : null
+        const isLive = !draftDone && overallIdx === currentPick
+        return (
+          <div key={teamId}
+            className={`bb-cell ${player ? `bb-filled pos-${player.position}` : ''} ${isLive ? 'bb-live' : ''}`}>
+            {player ? (
+              <>
+                <div className="bb-name">{player.name}</div>
+                <div className="bb-meta">{player.position} · {player.nfl_team || 'FA'} · {r + 1}.{String(idxInRound + 1).padStart(2, '0')}</div>
+              </>
+            ) : isLive ? (
+              <>
+                <div className="bb-name" style={{ color: 'var(--orange)' }}>PICKING</div>
+                <div className="bb-meta">{secondsLeft != null ? `0:${String(secondsLeft).padStart(2, '0')}` : '—'}</div>
+              </>
+            ) : (
+              <div className="bb-meta" style={{ opacity: 0.4 }}>{r + 1}.{String(idxInRound + 1).padStart(2, '0')}</div>
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+// ============================================================
+// DASHBOARD HERO — YOUR MATCHUP + stat strip + league scoreboard
+// ============================================================
+function DashboardHero({ league, teams, myTeamId, onFix }) {
+  const week = league.current_week || 1
+  const source = league.stats_source || 'live'
+  const [matchups, setMatchups] = useState([])
+  const [allCompleted, setAllCompleted] = useState([])
+  const [starters, setStarters] = useState([])
+  const [bench, setBench] = useState([])
+  const [playersById, setPlayersById] = useState({})
+  const [stats, setStats] = useState({})
+  const [proj, setProj] = useState({})
+
+  const { statsYear, statsWeek } = useMemo(() => {
+    if (source.startsWith('2025:')) return { statsYear: 2025, statsWeek: parseInt(source.split(':')[1], 10) || 1 }
+    return { statsYear: league.season || CURRENT_SEASON, statsWeek: week }
+  }, [source, week, league.season])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const { data: mu } = await supabase.from('matchups').select('*')
+        .eq('league_id', league.id).eq('week', week)
+      if (mounted) setMatchups((mu || []).filter(m => !m.is_playoff))
+      const { data: done } = await supabase.from('matchups').select('*')
+        .eq('league_id', league.id).eq('completed', true).eq('is_playoff', false)
+      if (mounted) setAllCompleted(done || [])
+      const { data: ro } = await supabase.from('rosters').select('*')
+        .eq('league_id', league.id).eq('week', week)
+      const rows = ro || []
+      if (mounted) {
+        setStarters(rows.filter(r => ROSTER_SLOTS.includes(r.slot)))
+        setBench(rows.filter(r => r.team_id === myTeamId && !ROSTER_SLOTS.includes(r.slot)))
+      }
+      const ids = [...new Set(rows.map(r => r.player_id))]
+      const byId = {}
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: ps } = await supabase.from('players').select('*').in('id', ids.slice(i, i + 300))
+        ;(ps || []).forEach(p => { byId[p.id] = p })
+      }
+      if (mounted) setPlayersById(byId)
+    })()
+    return () => { mounted = false }
+  }, [league.id, week, myTeamId])
+
+  useEffect(() => {
+    let mounted = true
+    const run = async () => {
+      try {
+        const res = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${statsYear}/${statsWeek}`)
+        if (res.ok) { const raw = await res.json(); if (mounted) setStats(normalizeSleeperStats(raw)) }
+      } catch { /* retry next poll */ }
+      try {
+        const res = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
+        if (res.ok) {
+          const raw = await res.json()
+          const map = {}
+          Object.entries(normalizeSleeperStats(raw)).forEach(([pid, s]) => {
+            const pts = s?.pts_half_ppr ?? s?.pts_std
+            if (typeof pts === 'number') map[pid] = pts
+          })
+          if (mounted) setProj(map)
+        }
+      } catch { /* fine */ }
+    }
+    run()
+    const t = setInterval(run, 60000)
+    return () => { mounted = false; clearInterval(t) }
+  }, [statsYear, statsWeek, week, league.season])
+
+  const teamsById = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams])
+  const pts = useCallback(pid => fantasyPoints(stats[pid], playersById[pid]?.position), [stats, playersById])
+  const teamScore = useCallback(tid =>
+    Math.round(starters.filter(r => r.team_id === tid).reduce((s, r) => s + pts(r.player_id), 0) * 10) / 10,
+    [starters, pts])
+  const teamProj = useCallback(tid =>
+    Math.round(starters.filter(r => r.team_id === tid).reduce((s, r) => s + (proj[r.player_id] || 0), 0) * 10) / 10,
+    [starters, proj])
+
+  // Records / rank / streak from completed games
+  const records = useMemo(() => {
+    const rec = {}
+    teams.forEach(t => { rec[t.id] = { w: 0, l: 0, t: 0, pf: 0, pa: 0, seq: [] } })
+    ;[...allCompleted].sort((a, b) => a.week - b.week).forEach(m => {
+      const h = rec[m.home_team_id], a = rec[m.away_team_id]
+      if (!h || !a) return
+      h.pf += m.home_score; h.pa += m.away_score
+      a.pf += m.away_score; a.pa += m.home_score
+      if (m.home_score > m.away_score) { h.w++; a.l++; h.seq.push('W'); a.seq.push('L') }
+      else if (m.away_score > m.home_score) { a.w++; h.l++; a.seq.push('W'); h.seq.push('L') }
+      else { h.t++; a.t++; h.seq.push('T'); a.seq.push('T') }
+    })
+    return rec
+  }, [teams, allCompleted])
+
+  const streakOf = tid => {
+    const seq = records[tid]?.seq || []
+    if (!seq.length) return '—'
+    const last = seq[seq.length - 1]
+    let n = 0
+    for (let i = seq.length - 1; i >= 0 && seq[i] === last; i--) n++
+    return `${last}${n}`
+  }
+  const rankOf = tid => {
+    const sorted = [...teams].sort((a, b) =>
+      (records[b.id]?.w || 0) - (records[a.id]?.w || 0) ||
+      (records[b.id]?.pf || 0) - (records[a.id]?.pf || 0))
+    return sorted.findIndex(t => t.id === tid) + 1
+  }
+  const ord = n => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`
+
+  const my = matchups.find(m => m.home_team_id === myTeamId || m.away_team_id === myTeamId)
+  if (!my) return null
+  const oppId = my.home_team_id === myTeamId ? my.away_team_id : my.home_team_id
+  const myScore = my.completed ? (my.home_team_id === myTeamId ? my.home_score : my.away_score) : teamScore(myTeamId)
+  const oppScore = my.completed ? (my.home_team_id === myTeamId ? my.away_score : my.home_score) : teamScore(oppId)
+  const myProj = teamProj(myTeamId), oppProj = teamProj(oppId)
+  const diff = (myScore + Math.max(myProj - myScore, 0)) - (oppScore + Math.max(oppProj - oppScore, 0))
+  const winPct = Math.min(99, Math.max(1, Math.round(100 / (1 + Math.pow(10, -diff / 25)))))
+  const myRec = records[myTeamId] || { w: 0, l: 0 }
+  const oppRec = records[oppId] || { w: 0, l: 0 }
+
+  // Lineup alert: bench player projected meaningfully above a starter he could replace
+  const alert = useMemo(() => {
+    const myStarters = starters.filter(r => r.team_id === myTeamId)
+    for (const b of bench) {
+      const bp = playersById[b.player_id]
+      if (!bp || proj[b.player_id] == null) continue
+      for (const s of myStarters) {
+        const sp = playersById[s.player_id]
+        if (!slotAccepts(bp.position, s.slot)) continue
+        const gap = (proj[b.player_id] || 0) - (proj[s.player_id] || 0)
+        if (gap >= 3) {
+          return `${bp.name} on your bench has ${Math.round(gap * 10) / 10} more projected than ${sp?.name || s.slot}.`
+        }
+      }
+    }
+    return null
+  }, [bench, starters, playersById, proj, myTeamId])
+
+  return (
+    <div className="card hero-card">
+      <div className="hero-top">
+        <span className="adv-label" style={{ margin: 0 }}>Your matchup</span>
+        <span className="dt-sub">Week {week}{my.completed ? ' · FINAL' : ''}</span>
+      </div>
+      <div className="hero-grid">
+        <div className="hero-side">
+          <div className="hero-team">{teamsById[myTeamId]?.team_name}</div>
+          <div className="hero-mgr">{teamsById[myTeamId]?.user_name} · {myRec.w}-{myRec.l}</div>
+          <div className="hero-score">{(myScore || 0).toFixed(1)}</div>
+          <div className="hero-proj">PROJ {myProj.toFixed(1)}</div>
+        </div>
+        <div className="hero-mid">
+          <span className="mu-vs">VS</span>
+          <div className="winbar"><div className="winbar-fill" style={{ width: `${winPct}%` }} /></div>
+          <span className="hero-win">{winPct}% WIN</span>
+        </div>
+        <div className="hero-side away">
+          <div className="hero-team">{teamsById[oppId]?.team_name}</div>
+          <div className="hero-mgr">{teamsById[oppId]?.user_name} · {oppRec.w}-{oppRec.l}</div>
+          <div className="hero-score">{(oppScore || 0).toFixed(1)}</div>
+          <div className="hero-proj">PROJ {oppProj.toFixed(1)}</div>
+        </div>
+      </div>
+
+      {alert && (
+        <div className="alert-banner">
+          <span><b>LINEUP ALERT</b> — {alert}</span>
+          <button className="btn btn-xs btn-primary" onClick={onFix}>FIX</button>
+        </div>
+      )}
+
+      <div className="stat-strip">
+        <div><span className="dt-label">Rank</span><b>{ord(rankOf(myTeamId))}</b></div>
+        <div><span className="dt-label">Rec</span><b>{myRec.w}-{myRec.l}</b></div>
+        <div><span className="dt-label">PF</span><b>{Math.round((myRec.pf || 0) * 10) / 10}</b></div>
+        <div><span className="dt-label">Strk</span><b>{streakOf(myTeamId)}</b></div>
+      </div>
+
+      {matchups.length > 1 && (
+        <>
+          <div className="hero-top" style={{ marginTop: 16 }}>
+            <span className="adv-label" style={{ margin: 0 }}>League scoreboard</span>
+            <span className="dt-sub">All games</span>
+          </div>
+          {matchups.filter(m => m.id !== my.id).map(m => (
+            <div key={m.id} className="mu-row">
+              <span className={`mu-team ${teamScore(m.home_team_id) > teamScore(m.away_team_id) ? 'lead' : ''}`}>
+                {teamsById[m.home_team_id]?.team_name}</span>
+              <span className="mu-score">{(m.completed ? m.home_score : teamScore(m.home_team_id)).toFixed(1)}</span>
+              <span className="mu-vs">vs</span>
+              <span className="mu-score">{(m.completed ? m.away_score : teamScore(m.away_team_id)).toFixed(1)}</span>
+              <span className={`mu-team away ${teamScore(m.away_team_id) > teamScore(m.home_team_id) ? 'lead' : ''}`}>
+                {teamsById[m.away_team_id]?.team_name}</span>
+              {m.completed && <span className="mu-final">FINAL</span>}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// TEAM PAGE V2 — kit layout: stat strip, STARTERS/BENCH/SEASON,
+// POS · PLAYER · PROJ · AVG · PTS table with tap-to-swap
+// ============================================================
+function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
+  const [roster, setRoster] = useState([])
+  const [playersById, setPlayersById] = useState({})
+  const [proj, setProj] = useState({})
+  const [stats, setStats] = useState({})
+  const [completed, setCompleted] = useState([])
+  const [moves, setMoves] = useState(0)
+  const [view, setView] = useState('starters') // starters | bench | season
+  const [selectedId, setSelectedId] = useState(null)
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const week = league.current_week || 1
+  const source = league.stats_source || 'live'
+  const lockMs = league.lineup_lock_at ? new Date(league.lineup_lock_at).getTime() : null
+  const locked = lockMs != null && Date.now() >= lockMs
+  const canEdit = !locked || isLeagueAdmin
+  const myTeam = teams.find(t => t.id === myTeamId)
+
+  const { statsYear, statsWeek } = useMemo(() => {
+    if (source.startsWith('2025:')) return { statsYear: 2025, statsWeek: parseInt(source.split(':')[1], 10) || 1 }
+    return { statsYear: league.season || CURRENT_SEASON, statsWeek: week }
+  }, [source, week, league.season])
+
+  const loadRoster = useCallback(async () => {
+    const { data } = await supabase.from('rosters').select('*')
+      .eq('league_id', league.id).eq('team_id', myTeamId).eq('week', week)
+    const rows = data || []
+    setRoster(rows)
+    const ids = rows.map(r => r.player_id)
+    if (ids.length) {
+      const { data: ps } = await supabase.from('players').select('*').in('id', ids)
+      setPlayersById(Object.fromEntries((ps || []).map(p => [p.id, p])))
+    }
+  }, [league.id, myTeamId, week])
+
+  useEffect(() => { loadRoster() }, [loadRoster])
+  useEffect(() => {
+    if (roster.length > 0) return
+    let tries = 0
+    const t = setInterval(() => { tries += 1; if (tries > 6) { clearInterval(t); return } loadRoster() }, 2000)
+    return () => clearInterval(t)
+  }, [roster.length, loadRoster])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const { data: done } = await supabase.from('matchups').select('*')
+        .eq('league_id', league.id).eq('completed', true).eq('is_playoff', false)
+      if (mounted) setCompleted(done || [])
+      const { count } = await supabase.from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('league_id', league.id).eq('team_id', myTeamId)
+      if (mounted) setMoves(count || 0)
+    })()
+    return () => { mounted = false }
+  }, [league.id, myTeamId])
+
+  useEffect(() => {
+    let mounted = true
+    const run = async () => {
+      try {
+        const res = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
+        if (res.ok) {
+          const map = {}
+          Object.entries(normalizeSleeperStats(await res.json())).forEach(([pid, s]) => {
+            const pts = s?.pts_half_ppr ?? s?.pts_std
+            if (typeof pts === 'number') map[pid] = Math.round(pts * 10) / 10
+          })
+          if (mounted) setProj(map)
+        }
+      } catch { /* fine */ }
+      try {
+        const res = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${statsYear}/${statsWeek}`)
+        if (res.ok && mounted) setStats(normalizeSleeperStats(await res.json()))
+      } catch { /* retry next poll */ }
+    }
+    run()
+    const t = setInterval(run, 60000)
+    return () => { mounted = false; clearInterval(t) }
+  }, [league.season, week, statsYear, statsWeek])
+
+  const rowBySlot = useMemo(() => Object.fromEntries(roster.map(r => [r.slot, r])), [roster])
+  const livePts = pid => fantasyPoints(stats[pid], playersById[pid]?.position)
+
+  // record / rank
+  const rec = useMemo(() => {
+    const out = { w: 0, l: 0, t: 0, pf: 0, pa: 0 }
+    completed.forEach(m => {
+      const home = m.home_team_id === myTeamId, away = m.away_team_id === myTeamId
+      if (!home && !away) return
+      const mine = home ? m.home_score : m.away_score
+      const theirs = home ? m.away_score : m.home_score
+      out.pf += mine; out.pa += theirs
+      if (mine > theirs) out.w++; else if (theirs > mine) out.l++; else out.t++
+    })
+    return out
+  }, [completed, myTeamId])
+  const rank = useMemo(() => {
+    const table = {}
+    teams.forEach(t => { table[t.id] = { w: 0, pf: 0 } })
+    completed.forEach(m => {
+      if (table[m.home_team_id]) { table[m.home_team_id].pf += m.home_score; if (m.home_score > m.away_score) table[m.home_team_id].w++ }
+      if (table[m.away_team_id]) { table[m.away_team_id].pf += m.away_score; if (m.away_score > m.home_score) table[m.away_team_id].w++ }
+    })
+    const sorted = [...teams].sort((a, b) => table[b.id].w - table[a.id].w || table[b.id].pf - table[a.id].pf)
+    return sorted.findIndex(t => t.id === myTeamId) + 1
+  }, [teams, completed, myTeamId])
+  const ord = n => n === 1 ? '1ST' : n === 2 ? '2ND' : n === 3 ? '3RD' : `${n}TH`
+
+  const handleTap = async (target) => {
+    if (!canEdit || busy) return
+    setMsg(null)
+    if (!selectedId) { if (target.row) setSelectedId(target.row.id); return }
+    const a = roster.find(r => r.id === selectedId)
+    if (!a) { setSelectedId(null); return }
+    if (target.row && target.row.id === a.id) { setSelectedId(null); return }
+    const pa = playersById[a.player_id]
+    setBusy(true)
+    try {
+      if (target.emptySlot) {
+        if (!slotAccepts(pa?.position, target.emptySlot)) {
+          setMsg({ t: 'err', v: `${pa?.name || 'That player'} can't go in ${target.emptySlot}.` })
+        } else {
+          const { error } = await supabase.from('rosters').update({ slot: target.emptySlot }).eq('id', a.id)
+          if (error) throw error
+          await loadRoster()
+        }
+      } else {
+        const b = target.row
+        const pb = playersById[b.player_id]
+        if (!slotAccepts(pa?.position, b.slot) || !slotAccepts(pb?.position, a.slot)) {
+          setMsg({ t: 'err', v: `That swap isn't position-legal (${pa?.position} ↔ ${pb?.position}).` })
+        } else {
+          const core = r => ({ league_id: r.league_id, team_id: r.team_id, player_id: r.player_id, week: r.week })
+          const { error: delErr } = await supabase.from('rosters').delete().in('id', [a.id, b.id])
+          if (delErr) throw delErr
+          const { error: insErr } = await supabase.from('rosters').insert([
+            { ...core(a), slot: b.slot }, { ...core(b), slot: a.slot },
+          ])
+          if (insErr) {
+            await supabase.from('rosters').insert([
+              { ...core(a), slot: a.slot }, { ...core(b), slot: b.slot },
+            ])
+            throw insErr
+          }
+          await loadRoster()
+        }
+      }
+    } catch (err) {
+      setMsg({ t: 'err', v: `Move failed: ${err.message}` })
+      await loadRoster()
+    }
+    setSelectedId(null)
+    setBusy(false)
+  }
+
+  const renderRow = (slot) => {
+    const row = rowBySlot[slot]
+    const p = row ? playersById[row.player_id] : null
+    const isSel = row && row.id === selectedId
+    return (
+      <div key={slot}
+        className={`lineup-row ${p ? `pos-${p.position}` : ''} ${isSel ? 'sel' : ''} ${!row ? 'open' : ''} ${canEdit ? 'tappable' : ''}`}
+        onClick={() => row ? handleTap({ row }) : handleTap({ emptySlot: slot })}>
+        <span className="lslot">{slot}</span>
+        {p ? (
+          <>
+            <span className="lname">{p.name}<span className="lmeta" style={{ display: 'block' }}>{p.position} · {p.nfl_team || 'FA'}</span></span>
+            <span className="tp-col">{proj[p.id] != null ? proj[p.id].toFixed(1) : '—'}</span>
+            <span className="tp-col">{p.last_season_avg != null ? p.last_season_avg.toFixed(1) : '—'}</span>
+            <span className="tp-col tp-pts">{livePts(p.id).toFixed(1)}</span>
+          </>
+        ) : (
+          <span className="lmeta">Empty — tap a player, then tap here</span>
+        )}
+      </div>
+    )
+  }
+
+  const starterProj = ROSTER_SLOTS.reduce((s, slot) => {
+    const row = rowBySlot[slot]
+    return s + (row && proj[row.player_id] != null ? proj[row.player_id] : 0)
+  }, 0)
+
+  const myWeeks = useMemo(() => {
+    return [...completed]
+      .filter(m => m.home_team_id === myTeamId || m.away_team_id === myTeamId)
+      .sort((a, b) => a.week - b.week)
+      .map(m => {
+        const home = m.home_team_id === myTeamId
+        const mine = home ? m.home_score : m.away_score
+        const theirs = home ? m.away_score : m.home_score
+        const oppId = home ? m.away_team_id : m.home_team_id
+        return { week: m.week, mine, theirs, opp: teams.find(t => t.id === oppId)?.team_name || '?', won: mine > theirs }
+      })
+  }, [completed, myTeamId, teams])
+
+  const illegal = roster.some(r => {
+    const p = playersById[r.player_id]
+    return p && !slotAccepts(p.position, r.slot)
+  })
+
+  return (
+    <>
+      <div className="card">
+        <div className="tp-header">
+          <div>
+            <span className="adv-label" style={{ margin: 0 }}>
+              {(myTeam?.user_name || '').toUpperCase()} · {ord(rank)} OF {teams.length}
+            </span>
+            <h2 style={{ fontSize: 30, marginBottom: 0 }}>{myTeam?.team_name || 'My Team'}</h2>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <span className="dt-label">Proj starters</span>
+            <div className="hero-score" style={{ fontSize: 30 }}>{(Math.round(starterProj * 10) / 10).toFixed(1)}</div>
+          </div>
+        </div>
+
+        <div className="stat-strip">
+          <div><span className="dt-label">Record</span><b>{rec.w}-{rec.l}-{rec.t}</b></div>
+          <div><span className="dt-label">PF</span><b>{(Math.round(rec.pf * 10) / 10).toFixed(1)}</b></div>
+          <div><span className="dt-label">PA</span><b>{(Math.round(rec.pa * 10) / 10).toFixed(1)}</b></div>
+          <div><span className="dt-label">Moves</span><b>{moves}</b></div>
+        </div>
+
+        {locked && (
+          <div className="lock-banner">
+            Lineups are locked for week {week}
+            {isLeagueAdmin ? ' — commissioner override active, edits still allowed.' : '.'}
+          </div>
+        )}
+        {!locked && lockMs && (
+          <p className="sub" style={{ marginTop: 8 }}>Lineups lock {new Date(lockMs).toLocaleString()}.</p>
+        )}
+        {illegal && (
+          <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: 'var(--red-soft)' }}>
+            Illegal lineup — a player is in a slot their position doesn't allow. Tap-swap to fix it before kickoff.
+          </div>
+        )}
+
+        <div className="tabs" style={{ margin: '16px 0 10px' }}>
+          {['starters', 'bench', 'season'].map(v => (
+            <button key={v} className={`tab ${view === v ? 'on' : ''}`} onClick={() => setView(v)}>{v}</button>
+          ))}
+        </div>
+
+        {view !== 'season' && (
+          <div className="tp-thead">
+            <span className="lslot">POS</span>
+            <span style={{ flex: 1 }}>PLAYER</span>
+            <span className="tp-col">PROJ</span>
+            <span className="tp-col">AVG</span>
+            <span className="tp-col">PTS</span>
+          </div>
+        )}
+        {view === 'starters' && ROSTER_SLOTS.map(renderRow)}
+        {view === 'bench' && BENCH_SLOTS.map(renderRow)}
+        {view === 'season' && (
+          myWeeks.length === 0 ? <p className="sub">Finalized weeks will appear here.</p> :
+          myWeeks.map(w => (
+            <div key={w.week} className="lineup-row">
+              <span className="lslot">WK {w.week}</span>
+              <span className="lname">{w.won ? 'W' : w.mine === w.theirs ? 'T' : 'L'} vs {w.opp}</span>
+              <span className="tp-col tp-pts">{w.mine.toFixed(1)}</span>
+              <span className="tp-col">{w.theirs.toFixed(1)}</span>
+            </div>
+          ))
+        )}
+
+        {canEdit && view !== 'season' && (
+          <p className="sub" style={{ marginTop: 12 }}>
+            Tap a player, then tap another player (or an empty slot) to swap — selection carries across the Starters/Bench tabs. Position rules apply.
+          </p>
+        )}
+        {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
+      </div>
+
+      <TradesPanel league={league} teams={teams} myTeamId={myTeamId} />
     </>
   )
 }
