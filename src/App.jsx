@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v7.0' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v7.1' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -526,6 +526,40 @@ select.input { appearance: none; }
 }
 .tp-col { font-size: 12px; min-width: 44px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tp-pts { color: var(--cyan); font-weight: 700; }
+
+/* ---------- Kit: bottom navigation (mobile) ---------- */
+.bottom-nav {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--surface); border-top: 1px solid var(--line-strong);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+}
+.bn-item {
+  flex: 1; background: transparent; border: none; cursor: pointer;
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; text-transform: uppercase;
+  font-size: 11px; letter-spacing: 0.1em; color: var(--faint);
+  padding: 10px 2px; border-radius: 6px;
+}
+.bn-item.on { color: var(--orange); }
+@media (max-width: 860px) {
+  .bottom-nav { display: flex; }
+  .top-tabs { display: none; }
+  .main { padding-bottom: 110px; }
+  .footer { padding-bottom: 70px; }
+}
+.strip-link { cursor: pointer; }
+.strip-link:hover b { color: var(--orange); }
+
+/* ---------- Kit: feed ---------- */
+.feed-post {
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  padding: 12px 14px; margin-bottom: 8px;
+}
+.feed-post.move { border-left: 3px solid var(--cyan); }
+.fp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.fp-head b { font-size: 13px; }
+.fp-meta { font-size: 10px; color: var(--faint); letter-spacing: 0.08em; }
+.fp-body { font-size: 13px; margin-top: 4px; color: var(--text); line-height: 1.45; }
 
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
@@ -1202,13 +1236,27 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
       )}
 
       {active && (
-        <div className="tabs">
+        <div className="tabs top-tabs">
           <button className={`tab ${tab === 'home' ? 'on' : ''}`} onClick={() => setTab('home')}>League</button>
-          <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>My Team</button>
-          <button className={`tab ${tab === 'scores' ? 'on' : ''}`} onClick={() => setTab('scores')}>Scoreboard</button>
+          <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>Team</button>
+          <button className={`tab ${tab === 'scores' ? 'on' : ''}`} onClick={() => setTab('scores')}>Matchup</button>
           <button className={`tab ${tab === 'players' ? 'on' : ''}`} onClick={() => setTab('players')}>Players</button>
           <button className={`tab ${tab === 'standings' ? 'on' : ''}`} onClick={() => setTab('standings')}>Standings</button>
+          <button className={`tab ${tab === 'feed' ? 'on' : ''}`} onClick={() => setTab('feed')}>Feed</button>
         </div>
+      )}
+
+      {active && (
+        <nav className="bottom-nav">
+          {[
+            ['home', 'League'], ['team', 'Team'], ['scores', 'Matchup'],
+            ['players', 'Players'], ['feed', 'Feed'],
+          ].map(([key, label]) => (
+            <button key={key} className={`bn-item ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>
+              {label}
+            </button>
+          ))}
+        </nav>
       )}
 
       {drafting ? (
@@ -1243,6 +1291,8 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         />
       ) : active && tab === 'standings' ? (
         <Standings league={league} teams={teams} myTeamId={myTeamId} isLeagueAdmin={isLeagueAdmin} />
+      ) : active && tab === 'feed' ? (
+        <FeedScreen league={league} teams={teams} myTeamId={myTeamId} session={session} />
       ) : (
         <LeagueHome
           league={league}
@@ -1268,7 +1318,7 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
   return (
     <>
       {league.status === 'active' && (
-        <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} />
+        <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} onStandings={() => setTab && setTab('standings')} />
       )}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -3344,7 +3394,7 @@ function FragmentRow({ r, order, numTeams, picksByNumber, playersById, currentPi
 // ============================================================
 // DASHBOARD HERO — YOUR MATCHUP + stat strip + league scoreboard
 // ============================================================
-function DashboardHero({ league, teams, myTeamId, onFix }) {
+function DashboardHero({ league, teams, myTeamId, onFix, onStandings }) {
   const week = league.current_week || 1
   const source = league.stats_source || 'live'
   const [matchups, setMatchups] = useState([])
@@ -3520,6 +3570,11 @@ function DashboardHero({ league, teams, myTeamId, onFix }) {
         <div><span className="dt-label">Rec</span><b>{myRec.w}-{myRec.l}</b></div>
         <div><span className="dt-label">PF</span><b>{Math.round((myRec.pf || 0) * 10) / 10}</b></div>
         <div><span className="dt-label">Strk</span><b>{streakOf(myTeamId)}</b></div>
+        {onStandings && (
+          <div className="strip-link" onClick={onStandings} role="button" tabIndex={0}>
+            <span className="dt-label">Standings</span><b>→</b>
+          </div>
+        )}
       </div>
 
       {matchups.length > 1 && (
@@ -3830,5 +3885,114 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
 
       <TradesPanel league={league} teams={teams} myTeamId={myTeamId} />
     </>
+  )
+}
+
+// ============================================================
+// FEED — recaps of league moves + trash talk (kit's FEED screen)
+// ============================================================
+function FeedScreen({ league, teams, myTeamId, session }) {
+  const [posts, setPosts] = useState([])
+  const [txns, setTxns] = useState([])
+  const [body, setBody] = useState('')
+  const [filter, setFilter] = useState('all') // all | moves | chat
+  const [busy, setBusy] = useState(false)
+
+  const myTeam = teams.find(t => t.id === myTeamId)
+
+  const load = useCallback(async () => {
+    const { data: p } = await supabase.from('feed_posts').select('*')
+      .eq('league_id', league.id)
+      .order('created_at', { ascending: false }).limit(50)
+    setPosts(p || [])
+    const { data: t } = await supabase.from('transactions').select('*')
+      .eq('league_id', league.id)
+      .order('created_at', { ascending: false }).limit(50)
+    setTxns(t || [])
+  }, [league.id])
+
+  useEffect(() => {
+    load()
+    const channel = supabase
+      .channel(`feed-${league.id}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'feed_posts', filter: `league_id=eq.${league.id}` }, load)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'transactions', filter: `league_id=eq.${league.id}` }, load)
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [league.id, load])
+
+  const items = useMemo(() => {
+    const chat = posts.map(p => ({ kind: 'chat', at: p.created_at, p }))
+    const moves = txns.map(t => ({ kind: 'move', at: t.created_at, t }))
+    const merged = [...chat, ...moves].sort((a, b) => new Date(b.at) - new Date(a.at))
+    if (filter === 'moves') return merged.filter(i => i.kind === 'move')
+    if (filter === 'chat') return merged.filter(i => i.kind === 'chat')
+    return merged
+  }, [posts, txns, filter])
+
+  const post = async () => {
+    const text = body.trim()
+    if (!text || busy) return
+    setBusy(true)
+    const { error } = await supabase.from('feed_posts').insert({
+      league_id: league.id,
+      user_id: session.user.id,
+      user_name: session.user.user_metadata?.full_name?.split(' ')[0] || session.user.email,
+      team_name: myTeam?.team_name || null,
+      body: text.slice(0, 500),
+    })
+    if (!error) setBody('')
+    setBusy(false)
+  }
+
+  const ago = (iso) => {
+    const mins = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+    if (mins < 60) return `${mins}M`
+    const hrs = Math.round(mins / 60)
+    if (hrs < 24) return `${hrs}H`
+    return `${Math.round(hrs / 24)}D`
+  }
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <h2 style={{ marginBottom: 0 }}>League feed</h2>
+        <div className="tabs" style={{ margin: 0 }}>
+          {['all', 'moves', 'chat'].map(f => (
+            <button key={f} className={`tab ${filter === f ? 'on' : ''}`}
+              style={{ padding: '6px 12px', fontSize: 12 }}
+              onClick={() => setFilter(f)}>{f}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="field" style={{ margin: '14px 0' }}>
+        <input className="input" placeholder="Say something…" maxLength={500}
+          value={body} onChange={e => setBody(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') post() }} />
+        <button className="btn btn-primary btn-sm" disabled={busy || !body.trim()} onClick={post}>POST</button>
+      </div>
+
+      {items.length === 0 && <p className="sub">Nothing yet — start the trash talk.</p>}
+      {items.map((item, i) => item.kind === 'chat' ? (
+        <div key={`c-${item.p.id}`} className="feed-post">
+          <div className="fp-head">
+            <b>{item.p.user_name}</b>
+            <span className="fp-meta">{(item.p.team_name || '').toUpperCase()} · {ago(item.p.created_at)}</span>
+          </div>
+          <div className="fp-body">{item.p.body}</div>
+        </div>
+      ) : (
+        <div key={`m-${item.t.id}`} className="feed-post move">
+          <div className="fp-head">
+            <b>{item.t.type === 'trade' ? 'Trade processed' : 'Roster move'}</b>
+            <span className="fp-meta">{ago(item.t.created_at)} AGO</span>
+          </div>
+          <div className="fp-body">{item.t.detail?.summary || item.t.type}</div>
+        </div>
+      ))}
+    </div>
   )
 }
