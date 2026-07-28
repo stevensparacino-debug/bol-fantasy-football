@@ -175,6 +175,17 @@ body { font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; 
 .order-list { font-size: 14px; }
 .order-list li { padding: 4px 0; }
 
+/* ---------- Draft board ---------- */
+.board-scroll { overflow-x: auto; margin-top: 16px; }
+.board { border-collapse: collapse; width: 100%; min-width: 900px; font-size: 12px; }
+.board th, .board td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+.board th { font-family: 'Bebas Neue', sans-serif; font-size: 14px; letter-spacing: 0.04em; background: var(--ink); color: var(--cream); position: sticky; top: 0; }
+.board .rnd { width: 34px; text-align: center; font-weight: 700; background: var(--cream); }
+.board td.filled { background: var(--chalk); }
+.board .bp-name { font-weight: 700; }
+.board .bp-meta { opacity: 0.6; font-size: 11px; }
+.board .bp-empty { opacity: 0.3; }
+
 @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 `
 
@@ -663,6 +674,40 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     setSeeding(false)
   }
 
+  // ---------- 2025 SEASON DATA ----------
+  const import2025 = async () => {
+    setSeeding(true)
+    setSeedMsg({ t: 'ok', v: 'Fetching 2025 season stats from Sleeper…' })
+    try {
+      const res = await fetch('https://api.sleeper.app/v1/stats/nfl/regular/2025')
+      if (!res.ok) throw new Error(`Sleeper API returned ${res.status}`)
+      const stats = await res.json()
+      const { data: existing } = await supabase.from('players').select('id').limit(5000)
+      const ids = new Set((existing || []).map(p => p.id))
+      const rows = []
+      Object.entries(stats).forEach(([pid, s]) => {
+        if (!ids.has(String(pid))) return
+        const pts = s?.pts_std
+        if (typeof pts === 'number' && pts !== 0) {
+          rows.push({ id: String(pid), last_season_pts: Math.round(pts * 10) / 10 })
+        }
+      })
+      setSeedMsg({ t: 'ok', v: `Updating ${rows.length} players with 2025 points…` })
+      for (let i = 0; i < rows.length; i += 500) {
+        const chunk = rows.slice(i, i + 500)
+        // upsert only touches id + last_season_pts; other columns unchanged
+        const { error: upErr } = await supabase.from('players')
+          .upsert(chunk, { onConflict: 'id' })
+        if (upErr) throw upErr
+        setSeedMsg({ t: 'ok', v: `Updating… ${Math.min(i + 500, rows.length)} / ${rows.length}` })
+      }
+      setSeedMsg({ t: 'ok', v: `Done — 2025 season points imported for ${rows.length} players.` })
+    } catch (err) {
+      setSeedMsg({ t: 'err', v: `2025 import failed: ${err.message}` })
+    }
+    setSeeding(false)
+  }
+
   // ---------- MOCK DRAFT ----------
   const createMock = async () => {
     setBusy(true); setMockMsg({ t: 'ok', v: 'Building mock league…' })
@@ -742,6 +787,9 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
             <button className="btn" disabled={seeding} onClick={seedPlayers}>
               {seeding ? 'Seeding…' : playerCount > 0 ? 'Re-seed players (Sleeper)' : 'Seed players (Sleeper)'}
             </button>
+            <button className="btn" disabled={seeding || playerCount === 0} onClick={import2025}>
+              Import 2025 season points
+            </button>
             <button className="btn" disabled={busy} onClick={toggleLock}>
               {league.status === 'setup' ? 'Lock league (close joins)' : 'Unlock league (reopen joins)'}
             </button>
@@ -806,7 +854,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   const [posFilter, setPosFilter] = useState('ALL')
   const [now, setNow] = useState(Date.now())
   const [busyPick, setBusyPick] = useState(false)
-  const firedForPick = useRef(-1) // guards duplicate autopick/bot fires per pick number
+  const firedForPick = useRef({ pick: -1, at: 0 }) // guards duplicate autopick/bot fires per pick number
 
   const numTeams = league.draft_order?.length || teams.length
   const totalPicks = TOTAL_ROUNDS * numTeams
@@ -900,26 +948,26 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     if (choice) await makePick(onClockTeamId, choice.id, currentPick)
   }, [draftDone, onClockTeamId, picks, playersById, players, draftedSet, makePick, currentPick])
 
-  // ---- bot picks (mock mode; only the admin's client drives bots) ----
+  // ---- unified pick driver (bots + expired clock), driven by the ticking `now` ----
+  // Fires when: a bot's short delay elapses (mock), or the 60s clock expires (any draft).
+  // The "handled" flag is set only at the moment of firing, and retries every 3s,
+  // so a cleaned-up render can never strand a pick at 0:00.
   useEffect(() => {
-    if (!isMock || !isLeagueAdmin || draftDone || league.paused) return
-    if (!onClockIsBot) return
-    if (firedForPick.current === currentPick) return
-    firedForPick.current = currentPick
-    const t = setTimeout(() => { doAutoPick() }, BOT_PICK_DELAY_MS)
-    return () => clearTimeout(t)
-  }, [isMock, isLeagueAdmin, draftDone, league.paused, onClockIsBot, currentPick, doAutoPick])
-
-  // ---- timer-expired autopick (admin client or the on-the-clock user's client) ----
-  useEffect(() => {
-    if (draftDone || league.paused || !deadlineMs) return
-    if (!(isLeagueAdmin || onClockIsMe)) return
-    if (now < deadlineMs + 500) return // small grace
-    if (firedForPick.current === currentPick && onClockIsBot) return
-    if (firedForPick.current === currentPick) return
-    firedForPick.current = currentPick
+    if (draftDone || league.paused || !deadlineMs || !onClockTeamId) return
+    if (players.length === 0 || busyPick) return
+    const iDrive = isLeagueAdmin || onClockIsMe
+    if (!iDrive) return
+    const pickStartMs = deadlineMs - DRAFT_PICK_TIMER * 1000
+    const botDueMs = isMock && onClockIsBot ? pickStartMs + BOT_PICK_DELAY_MS : Infinity
+    const expired = now >= deadlineMs + 500
+    if (!expired && now < botDueMs) return
+    // fire at most once per pick per 3s window (retry if the pick didn't advance)
+    const f = firedForPick.current
+    if (f.pick === currentPick && now - f.at < 3000) return
+    firedForPick.current = { pick: currentPick, at: now }
     doAutoPick()
-  }, [now, deadlineMs, draftDone, league.paused, isLeagueAdmin, onClockIsMe, onClockIsBot, currentPick, doAutoPick])
+  }, [now, deadlineMs, draftDone, league.paused, onClockTeamId, players.length, busyPick,
+      isLeagueAdmin, onClockIsMe, onClockIsBot, isMock, currentPick, doAutoPick])
 
   // ---- pause / resume (admin) ----
   const togglePause = async () => {
@@ -1028,6 +1076,9 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
               <div key={p.id} className="pool-row">
                 <span className="pname">{p.name}</span>
                 <span className="pmeta">{p.position} · {p.nfl_team || 'FA'}</span>
+                <span className="prank" title="2025 fantasy points (standard)">
+                  {p.last_season_pts != null ? `${p.last_season_pts} pts` : '—'}
+                </span>
                 <span className="prank">#{p.adp ?? '—'}</span>
                 <button className="btn btn-xs btn-primary" disabled={!canDraftNow || busyPick}
                   onClick={() => manualPick(p.id)}>
@@ -1067,6 +1118,72 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
           </div>
         </div>
       </div>
+
+      <DraftBoard league={league} teams={teams} picks={picks} playersById={playersById} numTeams={numTeams} />
     </>
+  )
+}
+
+// ============================================================
+// DRAFT BOARD — full rounds × teams grid
+// ============================================================
+function DraftBoard({ league, teams, picks, playersById, numTeams }) {
+  const [open, setOpen] = useState(true)
+  const teamsById = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams])
+  const order = league.draft_order || teams.map(t => t.id)
+  const picksByNumber = useMemo(
+    () => Object.fromEntries(picks.map(p => [p.pick_number, p])),
+    [picks]
+  )
+
+  return (
+    <div className="card" style={{ marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ marginBottom: 0 }}>Draft board</h2>
+        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(!open)}>
+          {open ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      {open && (
+        <div className="board-scroll">
+          <table className="board">
+            <thead>
+              <tr>
+                <th className="rnd">RD</th>
+                {order.map(id => (
+                  <th key={id}>{teamsById[id]?.team_name || '?'}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: TOTAL_ROUNDS }).map((_, r) => (
+                <tr key={r}>
+                  <td className="rnd">{r + 1}</td>
+                  {order.map((teamId, col) => {
+                    // snake: even rounds left→right, odd rounds right→left
+                    const idxInRound = r % 2 === 0 ? col : numTeams - 1 - col
+                    const overall = r * numTeams + idxInRound + 1 // 1-indexed pick_number
+                    const pick = picksByNumber[overall]
+                    const player = pick ? playersById[pick.player_id] : null
+                    return (
+                      <td key={teamId} className={player ? 'filled' : ''}>
+                        {player ? (
+                          <>
+                            <div className="bp-name">{player.name}</div>
+                            <div className="bp-meta">{player.position} · {player.nfl_team || 'FA'} · #{overall}</div>
+                          </>
+                        ) : (
+                          <span className="bp-empty">#{overall}</span>
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }
