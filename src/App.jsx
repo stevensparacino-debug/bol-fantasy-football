@@ -8,7 +8,7 @@ const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
-const APP_URL = 'https://YOUR-ORG.github.io/bol-fantasy-football/'
+const APP_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football'
 
 const FANTASY_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
 
