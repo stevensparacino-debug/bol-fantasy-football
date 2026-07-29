@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.3' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.4' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -673,6 +673,31 @@ select.input { appearance: none; }
 .drawer-item.danger:hover { background: rgba(255,90,90,0.10); color: var(--red); }
 @media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
 
+/* ---------- v8.4: odds, recap banner, week chip ---------- */
+.odds-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 14px; padding: 12px 14px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.odds-num {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  font-size: 34px; color: var(--cyan); font-variant-numeric: tabular-nums;
+}
+.feed-post.recap { border-color: var(--orange); padding: 0 0 12px; overflow: hidden; }
+.feed-post.recap .fp-body, .feed-post.recap > .fp-meta { padding: 0 14px; }
+.feed-post.recap .fp-body { margin-top: 10px; }
+.recap-banner {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--orange); color: var(--on-accent);
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; letter-spacing: 0.08em;
+  font-size: 12px; padding: 8px 14px;
+}
+.week-chip {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+  color: var(--orange); border: 1px solid var(--orange);
+  padding: 4px 10px; border-radius: 999px;
+}
+
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
 
@@ -1143,9 +1168,10 @@ function Lobby({ session, isAdmin, onDone }) {
         .eq('join_code', code).eq('is_mock', false).maybeSingle()
       if (cancelled || !lg) { if (!cancelled) setInvite(null); return }
       const { data: members } = await supabase.from('teams')
-        .select('user_name, team_name').eq('league_id', lg.id)
+        .select('user_name, team_name, user_id').eq('league_id', lg.id)
         .order('created_at', { ascending: true })
-      if (!cancelled) setInvite({ league: lg, members: members || [] })
+      const commish = (members || []).find(m => m.user_id === lg.admin_id)
+      if (!cancelled) setInvite({ league: lg, members: members || [], commish: commish?.user_name || null })
     })()
     return () => { cancelled = true }
   }, [joinCode])
@@ -1215,12 +1241,11 @@ function Lobby({ session, isAdmin, onDone }) {
           <div className="invite-card">
             <p className="adv-label" style={{ margin: '4px 0 2px' }}>You have been invited</p>
             <h2 style={{ fontSize: 28, marginBottom: 4 }}>{invite.league.name}</h2>
-            {invite.league.draft_at && (
-              <p className="sub" style={{ marginBottom: 12 }}>
-                Draft night is {new Date(invite.league.draft_at).toLocaleString(undefined,
-                  { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.
-              </p>
-            )}
+            <p className="sub" style={{ marginBottom: 12 }}>
+              {invite.commish ? `${invite.commish} invited you to the ${invite.league.season || CURRENT_SEASON} season.` : `Join the ${invite.league.season || CURRENT_SEASON} season.`}
+              {invite.league.draft_at && ` Draft night is ${new Date(invite.league.draft_at).toLocaleString(undefined,
+                { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.`}
+            </p>
             <div className="stat-strip" style={{ marginTop: 4 }}>
               <div><span className="dt-label">Format</span><b style={{ fontSize: 13 }}>Snake · 16 RDS</b></div>
               <div><span className="dt-label">Scoring</span><b style={{ fontSize: 13 }}>Half-PPR</b></div>
@@ -3199,15 +3224,16 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
 // STANDINGS — computed from completed matchups
 // ============================================================
 function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
-  const [matchups, setMatchups] = useState([])
+  const [allMatchups, setAllMatchups] = useState([])
   const [playoffGames, setPlayoffGames] = useState([])
+  const [subtab, setSubtab] = useState('overall') // overall | power | schedule
   const [poMsg, setPoMsg] = useState(null)
   const [busy, setBusy] = useState(false)
 
   const reload = useCallback(async () => {
     const { data } = await supabase.from('matchups').select('*')
-      .eq('league_id', league.id).eq('completed', true).eq('is_playoff', false)
-    setMatchups(data || [])
+      .eq('league_id', league.id).eq('is_playoff', false)
+    setAllMatchups(data || [])
     const { data: po } = await supabase.from('matchups').select('*')
       .eq('league_id', league.id).eq('is_playoff', true)
       .order('week', { ascending: true })
@@ -3216,14 +3242,16 @@ function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
 
   useEffect(() => { reload() }, [reload])
 
+  const matchups = useMemo(() => allMatchups.filter(m => m.completed), [allMatchups])
+
   const rows = useMemo(() => {
     const rec = {}
-    teams.forEach(t => { rec[t.id] = { team: t, w: 0, l: 0, t: 0, pf: 0, pa: 0, seq: [] } })
+    teams.forEach(t => { rec[t.id] = { team: t, w: 0, l: 0, t: 0, pf: 0, pa: 0, seq: [], scores: [] } })
     ;[...matchups].sort((a, b) => a.week - b.week).forEach(m => {
       const h = rec[m.home_team_id], a = rec[m.away_team_id]
       if (!h || !a) return
-      h.pf += m.home_score; h.pa += m.away_score
-      a.pf += m.away_score; a.pa += m.home_score
+      h.pf += m.home_score; h.pa += m.away_score; h.scores.push(m.home_score)
+      a.pf += m.away_score; a.pa += m.home_score; a.scores.push(m.away_score)
       if (m.home_score > m.away_score) { h.w++; a.l++; h.seq.push('W'); a.seq.push('L') }
       else if (m.away_score > m.home_score) { a.w++; h.l++; a.seq.push('W'); h.seq.push('L') }
       else { h.t++; a.t++; h.seq.push('T'); a.seq.push('T') }
@@ -3237,41 +3265,177 @@ function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
     }
     return Object.values(rec)
       .map(r => ({ ...r, stk: streak(r.seq) }))
-      .sort((x, y) => (y.w - x.w) || (y.pf - x.pf)) // wins, then points-for (league tiebreaker)
+      .sort((x, y) => (y.w - x.w) || (y.pf - x.pf))
   }, [teams, matchups])
+
+  // ---- Monte Carlo playoff odds: simulate the remaining regular season ----
+  const playoffOdds = useMemo(() => {
+    if (matchups.length === 0 || !myTeamId) return null
+    const SIMS = 10000
+    const stats = {}
+    let allScores = []
+    rows.forEach(r => { allScores = allScores.concat(r.scores) })
+    const lgMean = allScores.reduce((s, x) => s + x, 0) / Math.max(1, allScores.length)
+    const lgStd = Math.sqrt(allScores.reduce((s, x) => s + (x - lgMean) ** 2, 0) / Math.max(1, allScores.length)) || 20
+    rows.forEach(r => {
+      const n = r.scores.length
+      const mean = n >= 2 ? r.pf / n : lgMean
+      const std = n >= 3
+        ? Math.sqrt(r.scores.reduce((s, x) => s + (x - mean) ** 2, 0) / n) || lgStd
+        : lgStd
+      stats[r.team.id] = { mean, std: Math.max(8, std) }
+    })
+    const remaining = allMatchups.filter(m => !m.completed)
+    if (remaining.length === 0) {
+      const idx = rows.findIndex(r => r.team.id === myTeamId)
+      return idx >= 0 && idx < 6 ? 100 : 0
+    }
+    const baseW = {}, basePF = {}
+    rows.forEach(r => { baseW[r.team.id] = r.w; basePF[r.team.id] = r.pf })
+    const gauss = () => {
+      let u = 0, v = 0
+      while (u === 0) u = Math.random()
+      while (v === 0) v = Math.random()
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
+    }
+    let made = 0
+    for (let s = 0; s < SIMS; s++) {
+      const w = { ...baseW }, pf = { ...basePF }
+      for (const m of remaining) {
+        const hs = stats[m.home_team_id], as = stats[m.away_team_id]
+        if (!hs || !as) continue
+        const a = hs.mean + hs.std * gauss()
+        const b = as.mean + as.std * gauss()
+        pf[m.home_team_id] += a; pf[m.away_team_id] += b
+        if (a >= b) w[m.home_team_id]++; else w[m.away_team_id]++
+      }
+      const order = teams.map(t => t.id).sort((x, y) => (w[y] - w[x]) || (pf[y] - pf[x]))
+      if (order.indexOf(myTeamId) < 6) made++
+    }
+    return Math.round((made / SIMS) * 1000) / 10
+  }, [rows, allMatchups, teams, myTeamId, matchups.length])
+
+  // ---- Power rankings: recent form + season strength ----
+  const power = useMemo(() => {
+    return rows.map(r => {
+      const n = r.scores.length || 1
+      const last3 = r.scores.slice(-3)
+      const recent = last3.length ? last3.reduce((s, x) => s + x, 0) / last3.length : 0
+      const season = r.pf / n
+      const winPct = (r.w + 0.5 * r.t) / Math.max(1, r.w + r.l + r.t)
+      return { ...r, score: Math.round((season * 0.4 + recent * 0.4 + winPct * 100 * 0.2) * 10) / 10 }
+    }).sort((a, b) => b.score - a.score)
+  }, [rows])
+
+  // ---- My schedule ----
+  const mySchedule = useMemo(() => {
+    return [...allMatchups]
+      .filter(m => m.home_team_id === myTeamId || m.away_team_id === myTeamId)
+      .sort((a, b) => a.week - b.week)
+      .map(m => {
+        const home = m.home_team_id === myTeamId
+        const oppId = home ? m.away_team_id : m.home_team_id
+        const mine = home ? m.home_score : m.away_score
+        const theirs = home ? m.away_score : m.home_score
+        return {
+          week: m.week,
+          opp: teams.find(t => t.id === oppId)?.team_name || '?',
+          done: m.completed,
+          res: m.completed ? (mine > theirs ? 'W' : mine < theirs ? 'L' : 'T') : null,
+          mine, theirs,
+        }
+      })
+  }, [allMatchups, myTeamId, teams])
 
   return (
     <div className="card">
-      <h2>Standings</h2>
-      <p className="sub">Ranked by record, ties broken by points for. Top 6 make the playoffs (weeks 14-17).</p>
-      <p className="adv-label" style={{ marginTop: 4 }}>Playoff seeds 1–6</p>
-      <div className="board-scroll">
-        <table className="board" style={{ minWidth: 560 }}>
-          <thead>
-            <tr><th>#</th><th>Team</th><th>W-L</th><th>PF</th><th>PA</th><th>STK</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <React.Fragment key={r.team.id}>
-                {i === 6 && (
-                  <tr><td colSpan={6} style={{ padding: '8px', border: 'none' }}>
-                    <span className="adv-label" style={{ margin: 0 }}>In the hunt</span>
-                  </td></tr>
-                )}
-                <tr style={r.team.id === myTeamId ? { background: 'rgba(248,94,50,0.10)' } : undefined}>
-                  <td className="rnd">{i + 1}</td>
-                  <td className="filled"><span className="bp-name">{r.team.team_name}</span>
-                    <div className="bp-meta">{(r.team.user_name || '').toUpperCase()}{r.team.id === myTeamId ? ' · YOUR TEAM' : ''}</div></td>
-                  <td>{r.w}-{r.l}{r.t > 0 ? `-${r.t}` : ''}</td>
-                  <td>{(Math.round(r.pf * 10) / 10).toFixed(1)}</td>
-                  <td>{(Math.round(r.pa * 10) / 10).toFixed(1)}</td>
-                  <td>{r.stk}</td>
-                </tr>
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <h2 style={{ marginBottom: 0 }}>Standings</h2>
+        <div className="tabs" style={{ margin: 0 }}>
+          {['overall', 'power', 'schedule'].map(t => (
+            <button key={t} className={`tab ${subtab === t ? 'on' : ''}`}
+              style={{ padding: '6px 12px', fontSize: 12 }}
+              onClick={() => setSubtab(t)}>{t}</button>
+          ))}
+        </div>
       </div>
+
+      {subtab === 'overall' && (
+        <>
+          <p className="adv-label" style={{ marginTop: 12 }}>Playoff seeds 1–6</p>
+          <div className="board-scroll">
+            <table className="board" style={{ minWidth: 560 }}>
+              <thead>
+                <tr><th>#</th><th>Team</th><th>W-L</th><th>PF</th><th>PA</th><th>STK</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <React.Fragment key={r.team.id}>
+                    {i === 6 && (
+                      <tr><td colSpan={6} style={{ padding: '8px', border: 'none' }}>
+                        <span className="adv-label" style={{ margin: 0 }}>In the hunt</span>
+                      </td></tr>
+                    )}
+                    <tr style={r.team.id === myTeamId ? { background: 'rgba(248,94,50,0.10)' } : undefined}>
+                      <td className="rnd">{i + 1}</td>
+                      <td className="filled"><span className="bp-name">{r.team.team_name}</span>
+                        <div className="bp-meta">{(r.team.user_name || '').toUpperCase()}{r.team.id === myTeamId ? ' · YOUR TEAM' : ''}</div></td>
+                      <td>{r.w}-{r.l}{r.t > 0 ? `-${r.t}` : ''}</td>
+                      <td>{(Math.round(r.pf * 10) / 10).toFixed(1)}</td>
+                      <td>{(Math.round(r.pa * 10) / 10).toFixed(1)}</td>
+                      <td>{r.stk}</td>
+                    </tr>
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {playoffOdds != null && (
+            <div className="odds-row">
+              <div>
+                <span className="dt-label">Your playoff odds</span>
+                <div className="dt-sub">Simulated 10,000 seasons</div>
+              </div>
+              <span className="odds-num">{playoffOdds}%</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {subtab === 'power' && (
+        <>
+          <p className="sub" style={{ marginTop: 12 }}>Recent form (40%) + season scoring (40%) + record (20%).</p>
+          {power.map((r, i) => (
+            <div key={r.team.id} className="lineup-row" style={r.team.id === myTeamId ? { borderColor: 'var(--orange)' } : undefined}>
+              <span className="lslot">{i + 1}</span>
+              <span className="lname">{r.team.team_name}
+                <span className="lmeta" style={{ display: 'block' }}>{r.w}-{r.l} · {r.stk}</span></span>
+              <span className="tp-col tp-pts">{r.score.toFixed(1)}</span>
+            </div>
+          ))}
+          {power.every(p => p.scores.length === 0) && <p className="sub">Rankings appear after the first finalized week.</p>}
+        </>
+      )}
+
+      {subtab === 'schedule' && (
+        <>
+          <p className="sub" style={{ marginTop: 12 }}>Your season, week by week.</p>
+          {mySchedule.length === 0 && <p className="sub">Schedule appears once the commissioner generates it.</p>}
+          {mySchedule.map(g => (
+            <div key={g.week} className="lineup-row">
+              <span className="lslot">WK {g.week}</span>
+              <span className="lname">vs {g.opp}</span>
+              {g.done ? (
+                <span className={`tp-col ${g.res === 'W' ? 'tp-pts' : ''}`} style={g.res === 'L' ? { color: 'var(--red)' } : undefined}>
+                  {g.res} {g.mine.toFixed(1)}–{g.theirs.toFixed(1)}
+                </span>
+              ) : (
+                <span className="tp-col">—</span>
+              )}
+            </div>
+          ))}
+        </>
+      )}
 
       <hr className="divider" />
       <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Playoffs</h3>
@@ -3302,12 +3466,11 @@ function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
           <button className="btn btn-sm" disabled={busy} onClick={async () => {
             setBusy(true); setPoMsg(null)
             try {
-              const seeds = rows.map(r => r.team.id) // standings order = seeding
+              const seeds = rows.map(r => r.team.id)
               const completedPO = playoffGames.filter(g => g.completed)
               const winnerOf = g => (g.home_score >= g.away_score ? g.home_team_id : g.away_team_id)
               let inserts = []
               if (playoffGames.length === 0) {
-                // Round 1 (week 14): 3v6, 4v5; seeds 1-2 bye
                 inserts = [
                   { week: 14, home_team_id: seeds[2], away_team_id: seeds[5] },
                   { week: 14, home_team_id: seeds[3], away_team_id: seeds[4] },
@@ -3315,18 +3478,16 @@ function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
               } else if (playoffGames.filter(g => g.week === 14).length === 2 &&
                          completedPO.filter(g => g.week === 14).length === 2 &&
                          playoffGames.filter(g => g.week === 15).length === 0) {
-                // Semis (week 15): 1 seed vs worst surviving seed, 2 vs the other
                 const r1 = completedPO.filter(g => g.week === 14)
                 const winners = r1.map(winnerOf)
                 const seedIndex = id => seeds.indexOf(id)
-                winners.sort((a, b) => seedIndex(a) - seedIndex(b)) // better seed first
+                winners.sort((a, b) => seedIndex(a) - seedIndex(b))
                 inserts = [
                   { week: 15, home_team_id: seeds[0], away_team_id: winners[1] },
                   { week: 15, home_team_id: seeds[1], away_team_id: winners[0] },
                 ]
               } else if (completedPO.filter(g => g.week === 15).length === 2 &&
                          playoffGames.filter(g => g.week === 16).length === 0) {
-                // Championship (week 16)
                 const semis = completedPO.filter(g => g.week === 15)
                 inserts = [
                   { week: 16, home_team_id: winnerOf(semis[0]), away_team_id: winnerOf(semis[1]) },
@@ -4003,7 +4164,7 @@ function DashboardHero({ league, teams, myTeamId, onFix, onStandings }) {
     <div className="card hero-card">
       <div className="hero-top">
         <span className="adv-label" style={{ margin: 0 }}>Your matchup</span>
-        <span className="dt-sub">Week {week}{my.completed ? ' · FINAL' : ''}</span>
+        <span className="week-chip">WEEK {week} · {my.completed ? 'FINAL' : 'LIVE'}</span>
       </div>
       <div className="hero-grid">
         <div className="hero-side">
@@ -4529,6 +4690,16 @@ function FeedScreen({ league, teams, myTeamId, session }) {
 
       {items.length === 0 && <p className="sub">Nothing yet — start the trash talk.</p>}
       {items.map((item, i) => item.kind === 'chat' ? (
+        (item.p.team_name || '').includes('RECAP') ? (
+          <div key={`c-${item.p.id}`} className="feed-post recap">
+            <div className="recap-banner">
+              <span>{item.p.team_name}</span>
+              <span className="fp-meta" style={{ color: 'inherit', opacity: 0.85 }}>{ago(item.p.created_at)} AGO</span>
+            </div>
+            <div className="fp-body">{item.p.body}</div>
+            <div className="fp-meta" style={{ marginTop: 6 }}>🏈 COACH SUNDAY</div>
+          </div>
+        ) : (
         <div key={`c-${item.p.id}`} className="feed-post">
           <div className="fp-head">
             <b>{item.p.user_name}</b>
@@ -4536,6 +4707,7 @@ function FeedScreen({ league, teams, myTeamId, session }) {
           </div>
           <div className="fp-body">{item.p.body}</div>
         </div>
+        )
       ) : (
         <div key={`m-${item.t.id}`} className="feed-post move">
           <div className="fp-head">
