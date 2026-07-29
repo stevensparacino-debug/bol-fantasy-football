@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.8' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.9' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -4945,25 +4945,13 @@ function DraftCountdown({ league, teams }) {
             const fmt = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
             const start = new Date(at)
             const end = new Date(start.getTime() + 2 * 3600000)
-            const ics = [
-              'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//BOL Fantasy Football//EN',
-              'BEGIN:VEVENT',
-              `UID:bolff-draft-${league.id}`,
-              `DTSTAMP:${fmt(new Date())}`,
-              `DTSTART:${fmt(start)}`,
-              `DTEND:${fmt(end)}`,
-              `SUMMARY:${(league.name || 'BOL Fantasy Football')} — Draft Night 🏈`,
-              `DESCRIPTION:Snake draft\\, 16 rounds\\, 90-second clock. Be there: ${APP_URL}`,
-              'END:VEVENT', 'END:VCALENDAR',
-            ].join('\r\n')
-            const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
-            const a = document.createElement('a')
-            a.href = URL.createObjectURL(blob)
-            a.download = 'bol-draft-night.ics'
-            a.click()
-            URL.revokeObjectURL(a.href)
+            const url = 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+              `&text=${encodeURIComponent(`${league.name || 'BOL Fantasy Football'} — Draft Night 🏈`)}` +
+              `&dates=${fmt(start)}/${fmt(end)}` +
+              `&details=${encodeURIComponent(`Snake draft, 16 rounds, 90-second clock. Be there: ${APP_URL}`)}`
+            window.open(url, '_blank', 'noopener')
           }}>
-            📅 Add to calendar
+            📅 Add to Google Calendar
           </button>
         </>
       )}
