@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.1' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.2' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -640,6 +640,39 @@ select.input { appearance: none; }
 
 .mu-row.viewing { border-color: var(--cyan); }
 
+/* ---------- v8.2: hamburger + drawer ---------- */
+.hamburger {
+  background: transparent; border: 1px solid var(--line-strong); border-radius: 6px;
+  color: var(--text); font-size: 16px; line-height: 1; padding: 8px 11px; cursor: pointer;
+}
+.hamburger:hover { border-color: var(--orange); color: var(--orange); }
+.drawer-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 60;
+}
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 272px; z-index: 61;
+  background: var(--card); border-left: 1px solid var(--line-strong);
+  transform: translateX(100%); transition: transform 0.22s ease;
+  display: flex; flex-direction: column; padding: 16px;
+}
+.drawer.open { transform: translateX(0); }
+.drawer-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+  padding-bottom: 14px; margin-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.drawer-name { font-weight: 700; font-size: 14px; }
+.drawer-mail { font-size: 11px; color: var(--faint); margin-top: 2px; word-break: break-all; }
+.drawer-item {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border: none; border-radius: 8px; cursor: pointer;
+  font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 14px; color: var(--text);
+  padding: 13px 10px;
+}
+.drawer-item:hover { background: var(--surface); color: var(--orange); }
+.drawer-item.danger { color: var(--red); margin-top: auto; }
+.drawer-item.danger:hover { background: rgba(255,90,90,0.10); color: var(--red); }
+@media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
+
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
 
@@ -925,6 +958,7 @@ export default function App() {
   const [mockTeam, setMockTeam] = useState(null)
   const [mockLeague, setMockLeague] = useState(null)
   const [view, setView] = useState('home') // 'home' | 'mock'
+  const [menuOpen, setMenuOpen] = useState(false)
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('bolff_theme') || 'dark' } catch { return 'dark' }
   })
@@ -996,19 +1030,34 @@ export default function App() {
             <span className="display logo"><span>FANTASY</span> FOOTBALL</span>
           </div>
           <div className="user">
-            <button className="btn btn-sm btn-ghost" onClick={toggleTheme}
-              title="Toggle light/dark" aria-label="Toggle light/dark mode">
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
-            {mockLeague && (
-              <button className="btn btn-sm btn-ghost" onClick={() => setView(view === 'mock' ? 'home' : 'mock')}>
-                {view === 'mock' ? '← Back to league' : 'Mock draft →'}
-              </button>
-            )}
             <span>{session.user.user_metadata?.full_name?.split(' ')[0] || session.user.email}</span>
-            <button className="btn btn-sm btn-ghost" onClick={handleLogout}>Sign out</button>
+            <button className="hamburger" onClick={() => setMenuOpen(true)} aria-label="Open menu">☰</button>
           </div>
         </header>
+      )}
+
+      {session && menuOpen && <div className="drawer-backdrop" onClick={() => setMenuOpen(false)} />}
+      {session && (
+        <aside className={`drawer ${menuOpen ? 'open' : ''}`} aria-hidden={!menuOpen}>
+          <div className="drawer-head">
+            <div>
+              <div className="drawer-name">{session.user.user_metadata?.full_name || session.user.email}</div>
+              <div className="drawer-mail">{session.user.email}</div>
+            </div>
+            <button className="hamburger" onClick={() => setMenuOpen(false)} aria-label="Close menu">✕</button>
+          </div>
+          <button className="drawer-item" onClick={toggleTheme}>
+            {theme === 'dark' ? '☀️  Light mode' : '🌙  Dark mode'}
+          </button>
+          {isAdmin && mockLeague && (
+            <button className="drawer-item" onClick={() => { setView(view === 'mock' ? 'home' : 'mock'); setMenuOpen(false) }}>
+              {view === 'mock' ? '←  Back to real league' : '🧪  Mock draft'}
+            </button>
+          )}
+          <button className="drawer-item danger" onClick={() => { setMenuOpen(false); handleLogout() }}>
+            Sign out
+          </button>
+        </aside>
       )}
 
       <div className="main">
