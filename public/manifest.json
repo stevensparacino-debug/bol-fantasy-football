@@ -1,0 +1,16 @@
+{
+  "name": "BOL Fantasy Football",
+  "short_name": "BOL Fantasy",
+  "start_url": "/bol-fantasy-football/",
+  "scope": "/bol-fantasy-football/",
+  "display": "standalone",
+  "background_color": "#0E121A",
+  "theme_color": "#0E121A",
+  "icons": [
+    {
+      "src": "https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png",
+      "sizes": "any",
+      "type": "image/png"
+    }
+  ]
+}
