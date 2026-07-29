@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.0' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.1' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -637,6 +637,8 @@ select.input { appearance: none; }
   font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 999px;
   background: var(--surface); border: 1px solid var(--line); color: var(--muted);
 }
+
+.mu-row.viewing { border-color: var(--cyan); }
 
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
@@ -2939,6 +2941,16 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
   }, [starterRows, playerPts])
 
   const myMatchup = matchups.find(m => m.home_team_id === myTeamId || m.away_team_id === myTeamId)
+  const [selectedId, setSelectedId] = useState(null)
+  useEffect(() => { if (!selectedId && myMatchup) setSelectedId(myMatchup.id) }, [myMatchup, selectedId])
+  const selected = matchups.find(m => m.id === selectedId) || myMatchup || matchups[0] || null
+  const selIndex = selected ? matchups.findIndex(m => m.id === selected.id) : -1
+  const stepMatchup = (dir) => {
+    if (matchups.length < 2) return
+    const i = (selIndex + dir + matchups.length) % matchups.length
+    setSelectedId(matchups[i].id)
+  }
+  const touchX = useRef(null)
 
   const finalizeWeek = async () => {
     if (!window.confirm(`Finalize week ${week} scores? This writes results and marks matchups complete.`)) return
@@ -2980,7 +2992,9 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
     const hs = m.completed ? m.home_score : teamScore(m.home_team_id)
     const as = m.completed ? m.away_score : teamScore(m.away_team_id)
     return (
-      <div key={m.id} className={`mu-row ${mine ? 'mine' : ''}`}>
+      <div key={m.id} className={`mu-row ${mine ? 'mine' : ''} ${m.id === selected?.id ? 'viewing' : ''}`}
+        style={{ cursor: 'pointer' }} title="View head to head"
+        onClick={() => setSelectedId(m.id)}>
         <span className={`mu-team ${hs > as ? 'lead' : ''}`}>{teamsById[m.home_team_id]?.team_name || '?'}</span>
         <span className="mu-score">{hs.toFixed(1)}</span>
         <span className="mu-vs">vs</span>
@@ -2995,6 +3009,88 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
 
   return (
     <>
+      {selected && (() => {
+        const sideA = selected.home_team_id, sideB = selected.away_team_id
+        const involvesMe = sideA === myTeamId || sideB === myTeamId
+        const rowsOf = tid => starterRows.filter(r => r.team_id === tid)
+        const bySlot = rows => Object.fromEntries(rows.map(r => [r.slot, r]))
+        const aBy = bySlot(rowsOf(sideA)), bBy = bySlot(rowsOf(sideB))
+        const aScore = selected.completed ? selected.home_score : teamScore(sideA)
+        const bScore = selected.completed ? selected.away_score : teamScore(sideB)
+        const projOf = tid => Math.round(rowsOf(tid).reduce((s, r) => s + (proj[r.player_id] || 0), 0) * 10) / 10
+        const aProj = projOf(sideA), bProj = projOf(sideB)
+        const ytp = tid => rowsOf(tid).filter(r => !stats[r.player_id]).length
+        const d = (aScore + Math.max(aProj - aScore, 0)) - (bScore + Math.max(bProj - bScore, 0))
+        const winPct = Math.min(99, Math.max(1, Math.round(100 / (1 + Math.pow(10, -d / 25)))))
+        return (
+          <div className={`card ${involvesMe ? 'hero-card' : ''}`}
+            onTouchStart={e => { touchX.current = e.touches[0].clientX }}
+            onTouchEnd={e => {
+              if (touchX.current == null) return
+              const dx = e.changedTouches[0].clientX - touchX.current
+              touchX.current = null
+              if (Math.abs(dx) > 50) stepMatchup(dx < 0 ? 1 : -1)
+            }}>
+            <div className="hero-top">
+              <span className="adv-label" style={{ margin: 0 }}>
+                Head to head{involvesMe ? ' · your game' : ''}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button className="btn btn-xs btn-ghost" onClick={() => stepMatchup(-1)} aria-label="Previous game">‹</button>
+                <span className="dt-sub">Game {selIndex + 1} of {matchups.length} · swipe</span>
+                <button className="btn btn-xs btn-ghost" onClick={() => stepMatchup(1)} aria-label="Next game">›</button>
+              </div>
+            </div>
+            <div className="hero-grid">
+              <div className="hero-side">
+                <div className="hero-team">{teamsById[sideA]?.team_name}</div>
+                <div className="hero-score">{aScore.toFixed(1)}</div>
+                <div className="hero-proj">PROJ FINAL {aProj.toFixed(1)} · YET TO PLAY {ytp(sideA)}</div>
+              </div>
+              <div className="hero-mid">
+                <span className="dt-label">Win prob</span>
+                <div className="winbar"><div className="winbar-fill" style={{ width: `${winPct}%` }} /></div>
+                <span className="hero-win">{winPct} / {100 - winPct}</span>
+              </div>
+              <div className="hero-side away">
+                <div className="hero-team">{teamsById[sideB]?.team_name}</div>
+                <div className="hero-score">{bScore.toFixed(1)}</div>
+                <div className="hero-proj">PROJ FINAL {bProj.toFixed(1)} · YET TO PLAY {ytp(sideB)}</div>
+              </div>
+            </div>
+            <div className="h2h-thead">
+              <span style={{ flex: 1 }}>{(teamsById[sideA]?.user_name || '').toUpperCase()}</span>
+              <span className="h2h-pts">PTS</span>
+              <span className="h2h-slot">POS</span>
+              <span className="h2h-pts">PTS</span>
+              <span style={{ flex: 1, textAlign: 'right' }}>{(teamsById[sideB]?.user_name || '').toUpperCase()}</span>
+            </div>
+            {ROSTER_SLOTS.map(slot => {
+              const a = aBy[slot], b = bBy[slot]
+              const pa = a ? playersById[a.player_id] : null
+              const pb = b ? playersById[b.player_id] : null
+              const apts = a ? playerPts(a.player_id) : 0
+              const bpts = b ? playerPts(b.player_id) : 0
+              return (
+                <div key={slot} className="h2h-row">
+                  <span className="h2h-name">
+                    {pa ? pa.name : '—'}
+                    {pa && <span className="h2h-meta">{pa.nfl_team || 'FA'}{stats[a.player_id] ? '' : ' · yet to play'}{injuryTag(pa) ? ` · ${injuryTag(pa)}` : ''}</span>}
+                  </span>
+                  <span className={`h2h-pts ${apts > bpts ? 'lead' : ''}`}>{a && stats[a.player_id] ? apts.toFixed(1) : '—'}</span>
+                  <span className="h2h-slot">{slot.replace(/[0-9]/g, '')}</span>
+                  <span className={`h2h-pts ${bpts > apts ? 'lead' : ''}`}>{b && stats[b.player_id] ? bpts.toFixed(1) : '—'}</span>
+                  <span className="h2h-name away">
+                    {pb ? pb.name : '—'}
+                    {pb && <span className="h2h-meta">{pb.nfl_team || 'FA'}{stats[b.player_id] ? '' : ' · yet to play'}{injuryTag(pb) ? ` · ${injuryTag(pb)}` : ''}</span>}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
+
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
@@ -3046,73 +3142,7 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
         {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
       </div>
 
-      {myMatchup && (() => {
-        const oppId = myMatchup.home_team_id === myTeamId ? myMatchup.away_team_id : myMatchup.home_team_id
-        const oppStarters = starterRows.filter(r => r.team_id === oppId)
-        const bySlot = rows => Object.fromEntries(rows.map(r => [r.slot, r]))
-        const mine = bySlot(myStarters), theirs = bySlot(oppStarters)
-        const myScore = teamScore(myTeamId), oppScore = teamScore(oppId)
-        const projOf = tid => Math.round(starterRows.filter(r => r.team_id === tid)
-          .reduce((s, r) => s + (proj[r.player_id] || 0), 0) * 10) / 10
-        const myProj = projOf(myTeamId), oppProj = projOf(oppId)
-        const ytp = rows => rows.filter(r => !stats[r.player_id]).length
-        const d = (myScore + Math.max(myProj - myScore, 0)) - (oppScore + Math.max(oppProj - oppScore, 0))
-        const winPct = Math.min(99, Math.max(1, Math.round(100 / (1 + Math.pow(10, -d / 25)))))
-        return (
-          <div className="card">
-            <div className="hero-top">
-              <span className="adv-label" style={{ margin: 0 }}>Head to head</span>
-              <span className="dt-sub">Week {week}{myMatchup.completed ? ' · FINAL' : ' · IN PROGRESS'}</span>
-            </div>
-            <div className="hero-grid">
-              <div className="hero-side">
-                <div className="hero-team">{teamsById[myTeamId]?.team_name}</div>
-                <div className="hero-score">{myScore.toFixed(1)}</div>
-                <div className="hero-proj">PROJ FINAL {myProj.toFixed(1)} · YET TO PLAY {ytp(myStarters)}</div>
-              </div>
-              <div className="hero-mid">
-                <span className="dt-label">Win prob</span>
-                <div className="winbar"><div className="winbar-fill" style={{ width: `${winPct}%` }} /></div>
-                <span className="hero-win">{winPct} / {100 - winPct}</span>
-              </div>
-              <div className="hero-side away">
-                <div className="hero-team">{teamsById[oppId]?.team_name}</div>
-                <div className="hero-score">{oppScore.toFixed(1)}</div>
-                <div className="hero-proj">PROJ FINAL {oppProj.toFixed(1)} · YET TO PLAY {ytp(oppStarters)}</div>
-              </div>
-            </div>
-            <div className="h2h-thead">
-              <span style={{ flex: 1 }}>{(teamsById[myTeamId]?.user_name || 'ME').toUpperCase()}</span>
-              <span className="h2h-pts">PTS</span>
-              <span className="h2h-slot">POS</span>
-              <span className="h2h-pts">PTS</span>
-              <span style={{ flex: 1, textAlign: 'right' }}>{(teamsById[oppId]?.user_name || 'THEM').toUpperCase()}</span>
-            </div>
-            {ROSTER_SLOTS.map(slot => {
-              const a = mine[slot], b = theirs[slot]
-              const pa = a ? playersById[a.player_id] : null
-              const pb = b ? playersById[b.player_id] : null
-              const apts = a ? playerPts(a.player_id) : 0
-              const bpts = b ? playerPts(b.player_id) : 0
-              return (
-                <div key={slot} className="h2h-row">
-                  <span className="h2h-name">
-                    {pa ? pa.name : '—'}
-                    {pa && <span className="h2h-meta">{pa.nfl_team || 'FA'}{stats[a.player_id] ? '' : ' · yet to play'}{injuryTag(pa) ? ` · ${injuryTag(pa)}` : ''}</span>}
-                  </span>
-                  <span className={`h2h-pts ${apts > bpts ? 'lead' : ''}`}>{a && stats[a.player_id] ? apts.toFixed(1) : '—'}</span>
-                  <span className="h2h-slot">{slot.replace(/[0-9]/g, '')}</span>
-                  <span className={`h2h-pts ${bpts > apts ? 'lead' : ''}`}>{b && stats[b.player_id] ? bpts.toFixed(1) : '—'}</span>
-                  <span className="h2h-name away">
-                    {pb ? pb.name : '—'}
-                    {pb && <span className="h2h-meta">{pb.nfl_team || 'FA'}{stats[b.player_id] ? '' : ' · yet to play'}{injuryTag(pb) ? ` · ${injuryTag(pb)}` : ''}</span>}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        )
-      })()}
+
     </>
   )
 }
