@@ -5,7 +5,8 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const BUILD = 'v7.2' // bump on every deploy — shown in footer so we always know what's live
+const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
+const BUILD = 'v7.3' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -579,6 +580,15 @@ select.input { appearance: none; }
   letter-spacing: 0.06em; font-size: 22px; color: var(--lime);
 }
 
+/* ---------- Logo ---------- */
+.logo-wrap { display: flex; align-items: center; gap: 12px; }
+.logo-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #FFFFFF; border-radius: 6px; padding: 5px 9px;
+}
+.logo-img { height: 24px; display: block; }
+.login-logo { margin-bottom: 24px; padding: 8px 14px; }
+
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
 
@@ -902,7 +912,10 @@ export default function App() {
     <div className="app">
       {session && (
         <header className="header">
-          <div className="display logo">BOL <span>FANTASY</span> FOOTBALL</div>
+          <div className="logo-wrap">
+            <span className="logo-badge"><img className="logo-img" src={LOGO_URL} alt="BOL Agency" /></span>
+            <span className="display logo"><span>FANTASY</span> FOOTBALL</span>
+          </div>
           <div className="user">
             <button className="btn btn-sm btn-ghost" onClick={toggleTheme}
               title="Toggle light/dark" aria-label="Toggle light/dark mode">
@@ -974,6 +987,7 @@ export default function App() {
 function LoginScreen({ onLogin }) {
   return (
     <div className="login-hero">
+      <span className="logo-badge login-logo"><img className="logo-img" src={LOGO_URL} alt="BOL Agency" style={{ height: 40 }} /></span>
       <h1 className="display">BOL<br /><span className="accent">FANTASY</span><br />FOOTBALL</h1>
       <p>12 teams. Half-PPR scoring. One office champion. Sign in with Google to claim your spot.</p>
       <button className="btn btn-primary" onClick={onLogin}>Sign in with Google</button>
