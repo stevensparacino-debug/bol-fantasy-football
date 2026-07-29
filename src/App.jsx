@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.4' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.6' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -698,6 +698,38 @@ select.input { appearance: none; }
   padding: 4px 10px; border-radius: 999px;
 }
 
+/* ---------- v8.6: mobile draft UX ---------- */
+.draft-mtabs { display: none; gap: 6px; margin-bottom: 12px; }
+@media (max-width: 860px) {
+  .draft-mtabs { display: flex; }
+  .draft-mtabs .tab { flex: 1; text-align: center; }
+  .draft-col { display: none; }
+  .draft-col.mshow { display: block; }
+  /* command bar: sticky and compact so the clock is always visible */
+  .draft-topbar {
+    position: sticky; top: 52px; z-index: 30;
+    padding: 10px 12px; gap: 10px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  }
+  .dt-cell { min-width: 0; }
+  .dt-upnext { display: none; }
+  .dt-big { font-size: 24px; }
+  .dt-team { font-size: 14px; }
+  .clock { font-size: 28px; min-width: 54px; }
+  .draft-topbar .btn { padding: 6px 10px; font-size: 10px; }
+  .draft-header .display { font-size: 13px; }
+}
+@media (max-width: 560px) {
+  .pool { max-height: 60vh; }
+  .pool-row { padding: 11px 10px; gap: 8px; }
+  .pool-row .pmeta { min-width: 0; }
+  .pool-row .prank { display: none; }
+  .pool-row .prank:last-of-type { display: inline; }
+  .pool-row .btn-xs { padding: 8px 12px; font-size: 12px; }
+  .pool-controls .input { min-width: 140px; }
+  .bb-grid { min-width: 900px; }
+}
+
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
 
@@ -973,9 +1005,44 @@ async function runInstantDraft(league, teams) {
 }
 
 // ============================================================
+// ERROR BOUNDARY — readable crash screen instead of a white void
+// ============================================================
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null } }
+  static getDerivedStateFromError(err) { return { err } }
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ fontFamily: 'Archivo, sans-serif', background: '#0E121A', color: '#E7E7E9',
+          minHeight: '100vh', padding: '15vh 24px 0', textAlign: 'center' }}>
+          <h1 style={{ fontSize: 28, marginBottom: 12 }}>Something broke 🏈</h1>
+          <p style={{ color: '#8B8586', maxWidth: 520, margin: '0 auto 8px', fontSize: 14 }}>
+            Screenshot this and send it to the commissioner:
+          </p>
+          <pre style={{ color: '#FF5A5A', fontSize: 12, whiteSpace: 'pre-wrap', maxWidth: 640,
+            margin: '0 auto 24px', textAlign: 'left', background: '#151A25', padding: 14, borderRadius: 8 }}>
+            {String(this.state.err?.message || this.state.err)}
+          </pre>
+          <button onClick={() => window.location.reload()}
+            style={{ background: '#F85E32', color: '#0E121A', border: 'none', borderRadius: 6,
+              padding: '12px 24px', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
+            Reload the app
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+// ============================================================
 // APP
 // ============================================================
-export default function App() {
+export default function AppRoot() {
+  return <ErrorBoundary><App /></ErrorBoundary>
+}
+
+function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [realTeam, setRealTeam] = useState(null)
@@ -2090,6 +2157,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     try { localStorage.setItem(`bolff_queue_${league.id}`, JSON.stringify(queue)) } catch { /* ignore */ }
   }, [queue, league.id])
   const [connected, setConnected] = useState(1)
+  const [draftTab, setDraftTab] = useState('players') // mobile: 'players' | 'my'
   const [fastBots, setFastBotsState] = useState(() => {
     try { return localStorage.getItem('bolff_fast_bots') === '1' } catch { return false }
   }) // mock-only: bots pick every 200ms; remembered across refreshes
@@ -2380,8 +2448,17 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
         )}
       </div>
 
+      <div className="draft-mtabs">
+        <button className={`tab ${draftTab === 'players' ? 'on' : ''}`} onClick={() => setDraftTab('players')}>
+          Players
+        </button>
+        <button className={`tab ${draftTab === 'my' ? 'on' : ''}`} onClick={() => setDraftTab('my')}>
+          Queue & picks{displayQueue.length ? ` · ${displayQueue.length}` : ''}
+        </button>
+      </div>
+
       <div className="draft-layout">
-        <div>
+        <div className={`draft-col ${draftTab === 'players' ? 'mshow' : ''}`}>
           <div className="pool-controls">
             <input className="input" style={{ minWidth: 220 }} placeholder="Search players…"
               value={search} onChange={e => setSearch(e.target.value)} />
@@ -2420,7 +2497,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
           )}
         </div>
 
-        <div>
+        <div className={`draft-col ${draftTab === 'my' ? 'mshow' : ''}`}>
           <div className="side-card queue-card">
             <h3>My queue{displayQueue.length ? ` · ${displayQueue.length}` : ''}</h3>
             {displayQueue.length === 0 && (
@@ -3268,51 +3345,71 @@ function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
       .sort((x, y) => (y.w - x.w) || (y.pf - x.pf))
   }, [teams, matchups])
 
-  // ---- Monte Carlo playoff odds: simulate the remaining regular season ----
-  const playoffOdds = useMemo(() => {
-    if (matchups.length === 0 || !myTeamId) return null
-    const SIMS = 10000
-    const stats = {}
+  // ---- Monte Carlo playoff odds: runs AFTER render in small chunks so the
+  //      UI never blocks (10,000 sims was freezing the paint when computed
+  //      synchronously during render) ----
+  const [playoffOdds, setPlayoffOdds] = useState(null)
+  useEffect(() => {
+    if (matchups.length === 0 || !myTeamId || teams.length === 0) { setPlayoffOdds(null); return }
+    let cancelled = false
+    const ids = teams.map(t => t.id)
+    const idx = Object.fromEntries(ids.map((id, i) => [id, i]))
+    const n = ids.length
     let allScores = []
     rows.forEach(r => { allScores = allScores.concat(r.scores) })
     const lgMean = allScores.reduce((s, x) => s + x, 0) / Math.max(1, allScores.length)
     const lgStd = Math.sqrt(allScores.reduce((s, x) => s + (x - lgMean) ** 2, 0) / Math.max(1, allScores.length)) || 20
+    const meanA = new Float64Array(n), stdA = new Float64Array(n)
     rows.forEach(r => {
-      const n = r.scores.length
-      const mean = n >= 2 ? r.pf / n : lgMean
-      const std = n >= 3
-        ? Math.sqrt(r.scores.reduce((s, x) => s + (x - mean) ** 2, 0) / n) || lgStd
+      const i = idx[r.team.id]
+      const cnt = r.scores.length
+      const mean = cnt >= 2 ? r.pf / cnt : lgMean
+      const std = cnt >= 3
+        ? Math.sqrt(r.scores.reduce((s, x) => s + (x - mean) ** 2, 0) / cnt) || lgStd
         : lgStd
-      stats[r.team.id] = { mean, std: Math.max(8, std) }
+      meanA[i] = mean; stdA[i] = Math.max(8, std)
     })
-    const remaining = allMatchups.filter(m => !m.completed)
+    const remaining = allMatchups
+      .filter(m => !m.completed)
+      .map(m => [idx[m.home_team_id], idx[m.away_team_id]])
+      .filter(p => p[0] != null && p[1] != null)
     if (remaining.length === 0) {
-      const idx = rows.findIndex(r => r.team.id === myTeamId)
-      return idx >= 0 && idx < 6 ? 100 : 0
+      const i = rows.findIndex(r => r.team.id === myTeamId)
+      setPlayoffOdds(i >= 0 && i < 6 ? 100 : 0)
+      return
     }
-    const baseW = {}, basePF = {}
-    rows.forEach(r => { baseW[r.team.id] = r.w; basePF[r.team.id] = r.pf })
+    const baseW = new Float64Array(n), basePF = new Float64Array(n)
+    rows.forEach(r => { baseW[idx[r.team.id]] = r.w; basePF[idx[r.team.id]] = r.pf })
+    const me = idx[myTeamId]
     const gauss = () => {
       let u = 0, v = 0
       while (u === 0) u = Math.random()
       while (v === 0) v = Math.random()
       return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
     }
-    let made = 0
-    for (let s = 0; s < SIMS; s++) {
-      const w = { ...baseW }, pf = { ...basePF }
-      for (const m of remaining) {
-        const hs = stats[m.home_team_id], as = stats[m.away_team_id]
-        if (!hs || !as) continue
-        const a = hs.mean + hs.std * gauss()
-        const b = as.mean + as.std * gauss()
-        pf[m.home_team_id] += a; pf[m.away_team_id] += b
-        if (a >= b) w[m.home_team_id]++; else w[m.away_team_id]++
+    const SIMS = 10000, CHUNK = 500
+    let done = 0, made = 0
+    const order = Array.from({ length: n }, (_, i) => i)
+    const runChunk = () => {
+      if (cancelled) return
+      for (let s = 0; s < CHUNK && done < SIMS; s++, done++) {
+        const w = Float64Array.from(baseW), pf = Float64Array.from(basePF)
+        for (const [h, a] of remaining) {
+          const hs = meanA[h] + stdA[h] * gauss()
+          const as2 = meanA[a] + stdA[a] * gauss()
+          pf[h] += hs; pf[a] += as2
+          if (hs >= as2) w[h]++; else w[a]++
+        }
+        for (let i = 0; i < n; i++) order[i] = i
+        order.sort((x, y) => (w[y] - w[x]) || (pf[y] - pf[x]))
+        if (order.indexOf(me) < 6) made++
       }
-      const order = teams.map(t => t.id).sort((x, y) => (w[y] - w[x]) || (pf[y] - pf[x]))
-      if (order.indexOf(myTeamId) < 6) made++
+      if (done < SIMS) setTimeout(runChunk, 0)
+      else if (!cancelled) setPlayoffOdds(Math.round((made / SIMS) * 1000) / 10)
     }
-    return Math.round((made / SIMS) * 1000) / 10
+    setPlayoffOdds(null)
+    const t = setTimeout(runChunk, 50)
+    return () => { cancelled = true; clearTimeout(t) }
   }, [rows, allMatchups, teams, myTeamId, matchups.length])
 
   // ---- Power rankings: recent form + season strength ----
@@ -3390,13 +3487,13 @@ function Standings({ league, teams, myTeamId, isLeagueAdmin }) {
               </tbody>
             </table>
           </div>
-          {playoffOdds != null && (
+          {matchups.length > 0 && (
             <div className="odds-row">
               <div>
                 <span className="dt-label">Your playoff odds</span>
                 <div className="dt-sub">Simulated 10,000 seasons</div>
               </div>
-              <span className="odds-num">{playoffOdds}%</span>
+              <span className="odds-num">{playoffOdds != null ? `${playoffOdds}%` : '…'}</span>
             </div>
           )}
         </>
