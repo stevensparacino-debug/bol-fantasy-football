@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.2' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.3' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1030,7 +1030,6 @@ export default function App() {
             <span className="display logo"><span>FANTASY</span> FOOTBALL</span>
           </div>
           <div className="user">
-            <span>{session.user.user_metadata?.full_name?.split(' ')[0] || session.user.email}</span>
             <button className="hamburger" onClick={() => setMenuOpen(true)} aria-label="Open menu">☰</button>
           </div>
         </header>
