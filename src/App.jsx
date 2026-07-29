@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.6' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.7' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1069,6 +1069,14 @@ function App() {
   }, [])
 
   useEffect(() => {
+    // Stash an invite code from the URL (?join=ABC123) — the Google OAuth
+    // round-trip strips query params, so it must survive in localStorage.
+    try {
+      const code = new URLSearchParams(window.location.search).get('join')
+      if (code && /^[A-Za-z0-9]{6}$/.test(code)) {
+        localStorage.setItem('bolff_join', code.toUpperCase())
+      }
+    } catch { /* ignore */ }
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setLoading(false)
@@ -1218,7 +1226,9 @@ function LoginScreen({ onLogin }) {
 // LOBBY
 // ============================================================
 function Lobby({ session, isAdmin, onDone }) {
-  const [joinCode, setJoinCode] = useState('')
+  const [joinCode, setJoinCode] = useState(() => {
+    try { return localStorage.getItem('bolff_join') || '' } catch { return '' }
+  })
   const [teamName, setTeamName] = useState('')
   const [leagueName, setLeagueName] = useState('BOL Fantasy Football')
   const [adminTeamName, setAdminTeamName] = useState('')
@@ -1291,6 +1301,7 @@ function Lobby({ session, isAdmin, onDone }) {
       setMsg({ t: 'err', v: tErr.message.includes('duplicate') ? 'You already have a team in this league.' : tErr.message })
       setBusy(false); return
     }
+    try { localStorage.removeItem('bolff_join') } catch { /* ignore */ }
     setBusy(false); onDone()
   }
 
@@ -1636,6 +1647,22 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
             <div style={{ textAlign: 'right' }}>
               <p className="sub" style={{ marginBottom: 6 }}>Share this code:</p>
               <div className="code-chip">{league.join_code}</div>
+              <div>
+                <button className="btn btn-xs btn-ghost" style={{ marginTop: 6 }}
+                  onClick={async () => {
+                    const msg = `🏈 ${league.name} — claim your spot!\n` +
+                      `${APP_URL}?join=${league.join_code}\n` +
+                      `Sign in with Google and you're in.` +
+                      (league.draft_at ? ` Draft night: ${new Date(league.draft_at).toLocaleString(undefined,
+                        { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.` : '')
+                    try {
+                      await navigator.clipboard.writeText(msg)
+                      window.alert('Invite copied — paste it in Slack.')
+                    } catch { window.prompt('Copy this invite:', msg) }
+                  }}>
+                  Copy invite message
+                </button>
+              </div>
             </div>
           )}
         </div>
