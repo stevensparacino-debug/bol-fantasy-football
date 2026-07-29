@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v7.3' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.0' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -589,6 +589,55 @@ select.input { appearance: none; }
 .logo-img { height: 24px; display: block; }
 .login-logo { margin-bottom: 24px; padding: 8px 14px; }
 
+/* ---------- v8: draft header + queue ---------- */
+.draft-header {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.live-pill {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+  color: var(--lime); border: 1px solid var(--lime);
+  padding: 4px 10px; border-radius: 999px;
+}
+.queue-card { border-color: rgba(123,237,248,0.4); }
+
+/* ---------- v8: head-to-head ---------- */
+.h2h-thead {
+  display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 4px 10px 8px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--faint);
+}
+.h2h-row {
+  display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+  border: 1px solid var(--line); border-radius: 6px; margin-bottom: 5px;
+  background: var(--surface); font-size: 13px;
+}
+.h2h-name { flex: 1; font-weight: 700; min-width: 0; }
+.h2h-name.away { text-align: right; }
+.h2h-meta { display: block; font-size: 10px; color: var(--faint); font-weight: 400; }
+.h2h-pts { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); }
+.h2h-pts.lead { color: var(--lime); font-weight: 700; }
+.h2h-slot {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 11px;
+  min-width: 38px; text-align: center; color: var(--cyan);
+}
+
+/* ---------- v8: injury tags + totals ---------- */
+.inj-tag {
+  display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 700;
+  letter-spacing: 0.08em; padding: 2px 6px; border-radius: 4px;
+  background: var(--raise); color: var(--yellow); vertical-align: middle;
+}
+.inj-tag.bad { color: var(--red); }
+.tot-row { border-top: 2px solid var(--line-strong); background: var(--card); font-weight: 700; }
+
+/* ---------- v8: invite ---------- */
+.invite-card { border-top: 1px dashed var(--line-strong); padding-top: 14px; margin-top: 4px; }
+.member-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.member-chip {
+  font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); color: var(--muted);
+}
+
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
 
@@ -757,6 +806,34 @@ function normalizeSleeperStats(raw) {
   const map = {}
   pairs.forEach(([pid, s]) => { if (pid && s && typeof s === 'object') map[pid] = s })
   return map
+}
+
+// Human stat-line summary: "9 REC 141 YDS 2 TD"
+function statLine(s, position) {
+  if (!s) return null
+  const parts = []
+  if (s.pass_yd) parts.push(`${Math.round(s.pass_yd)} PASS YDS${s.pass_td ? ` ${s.pass_td} TD` : ''}${s.pass_int ? ` ${s.pass_int} INT` : ''}`)
+  if (s.rush_yd) parts.push(`${Math.round(s.rush_yd)} RUSH YDS${s.rush_td ? ` ${s.rush_td} TD` : ''}`)
+  if (s.rec) parts.push(`${s.rec} REC ${Math.round(s.rec_yd || 0)} YDS${s.rec_td ? ` ${s.rec_td} TD` : ''}`)
+  if (position === 'K') {
+    const fg = (s.fgm_0_19 || 0) + (s.fgm_20_29 || 0) + (s.fgm_30_39 || 0) + (s.fgm_40_49 || 0) + (s.fgm_50p || 0)
+    if (fg || s.xpm) parts.push(`${fg} FG ${s.xpm || 0} XP`)
+  }
+  if (position === 'DEF') {
+    parts.push(`${s.pts_allow != null ? s.pts_allow : '—'} PTS ALLOWED${s.sack ? ` · ${s.sack} SCK` : ''}`)
+  }
+  return parts.slice(0, 2).join(' · ') || null
+}
+
+// Injury tag from the seeded status field ('Questionable', 'Out', 'IR'…)
+function injuryTag(p) {
+  const st = (p?.status || '').toLowerCase()
+  if (!st || st === 'active' || st === 'inactive') return null
+  if (st.includes('questionable')) return 'Q'
+  if (st.includes('doubtful')) return 'D'
+  if (st === 'out' || st.includes('out')) return 'OUT'
+  if (st.includes('ir')) return 'IR'
+  return p.status.toUpperCase().slice(0, 4)
 }
 
 // Scale a stat line by fraction f (0..1) - used by simulated-live replay
@@ -1005,6 +1082,23 @@ function Lobby({ session, isAdmin, onDone }) {
   const [adminTeamName, setAdminTeamName] = useState('')
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [invite, setInvite] = useState(null) // { league, members } when a valid code is typed
+
+  useEffect(() => {
+    const code = joinCode.trim().toUpperCase()
+    if (code.length !== 6) { setInvite(null); return }
+    let cancelled = false
+    ;(async () => {
+      const { data: lg } = await supabase.from('leagues').select('*')
+        .eq('join_code', code).eq('is_mock', false).maybeSingle()
+      if (cancelled || !lg) { if (!cancelled) setInvite(null); return }
+      const { data: members } = await supabase.from('teams')
+        .select('user_name, team_name').eq('league_id', lg.id)
+        .order('created_at', { ascending: true })
+      if (!cancelled) setInvite({ league: lg, members: members || [] })
+    })()
+    return () => { cancelled = true }
+  }, [joinCode])
 
   const displayName =
     session.user.user_metadata?.full_name?.split(' ')[0] || session.user.email
@@ -1061,16 +1155,48 @@ function Lobby({ session, isAdmin, onDone }) {
     <>
       <div className="card">
         <h2>Join the League</h2>
-        <p className="sub">Got a join code from the commissioner? Enter it and name your team.</p>
+        <p className="sub">Got a join code from the commissioner? Enter it below.</p>
         <div className="field" style={{ marginBottom: 10 }}>
           <input className="input code" placeholder="JOIN CODE" maxLength={6}
             value={joinCode} onChange={e => setJoinCode(e.target.value)} />
         </div>
-        <div className="field">
-          <input className="input" placeholder="Your team name" maxLength={40}
-            value={teamName} onChange={e => setTeamName(e.target.value)} />
-          <button className="btn btn-primary" disabled={busy} onClick={joinLeague}>Join league</button>
-        </div>
+
+        {invite ? (
+          <div className="invite-card">
+            <p className="adv-label" style={{ margin: '4px 0 2px' }}>You have been invited</p>
+            <h2 style={{ fontSize: 28, marginBottom: 4 }}>{invite.league.name}</h2>
+            {invite.league.draft_at && (
+              <p className="sub" style={{ marginBottom: 12 }}>
+                Draft night is {new Date(invite.league.draft_at).toLocaleString(undefined,
+                  { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.
+              </p>
+            )}
+            <div className="stat-strip" style={{ marginTop: 4 }}>
+              <div><span className="dt-label">Format</span><b style={{ fontSize: 13 }}>Snake · 16 RDS</b></div>
+              <div><span className="dt-label">Scoring</span><b style={{ fontSize: 13 }}>Half-PPR</b></div>
+              <div><span className="dt-label">Teams</span><b style={{ fontSize: 13 }}>{invite.members.length} of {MAX_TEAMS}</b></div>
+              <div><span className="dt-label">Buy-in</span><b style={{ fontSize: 13 }}>Pride only</b></div>
+            </div>
+            {invite.members.length > 0 && (
+              <>
+                <p className="adv-label" style={{ marginTop: 14 }}>In the league</p>
+                <div className="member-chips">
+                  {invite.members.slice(0, 8).map((m, i) => <span key={i} className="member-chip">{m.user_name}</span>)}
+                  {invite.members.length > 8 && <span className="member-chip">+{invite.members.length - 8} more</span>}
+                </div>
+              </>
+            )}
+            <div className="field" style={{ marginTop: 14 }}>
+              <input className="input" placeholder="Name your team" maxLength={40}
+                value={teamName} onChange={e => setTeamName(e.target.value)} />
+              <button className="btn btn-primary" disabled={busy} onClick={joinLeague}>
+                {invite.members.length >= MAX_TEAMS - 1 ? 'CLAIM THE LAST SPOT' : 'CLAIM YOUR SPOT'}
+              </button>
+            </div>
+          </div>
+        ) : joinCode.trim().length === 6 ? (
+          <p className="msg err">No league found with that code — double-check it.</p>
+        ) : null}
       </div>
 
       {isAdmin && (
@@ -1387,6 +1513,8 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
         </div>
         {league.status === 'active' && <TransactionsFeed league={league} />}
       </div>
+
+      <RulesCard />
 
       {(league.status === 'setup' || league.status === 'locked') && !isMock && (
         <PreDraftCoach league={league} teams={teams} myTeamId={myTeamId} />
@@ -1880,6 +2008,13 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   const [posFilter, setPosFilter] = useState('ALL')
   const [now, setNow] = useState(Date.now())
   const [busyPick, setBusyPick] = useState(false)
+  const [queue, setQueue] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`bolff_queue_${league.id}`) || '[]') } catch { return [] }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(`bolff_queue_${league.id}`, JSON.stringify(queue)) } catch { /* ignore */ }
+  }, [queue, league.id])
+  const [connected, setConnected] = useState(1)
   const [fastBots, setFastBotsState] = useState(() => {
     try { return localStorage.getItem('bolff_fast_bots') === '1' } catch { return false }
   }) // mock-only: bots pick every 200ms; remembered across refreshes
@@ -1940,6 +2075,21 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [league.id, loadPicks])
+
+  // ---- presence: who's in the draft room ----
+  useEffect(() => {
+    const channel = supabase.channel(`draft-presence-${league.id}`, {
+      config: { presence: { key: session.user.id } },
+    })
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        setConnected(Object.keys(channel.presenceState()).length || 1)
+      })
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') channel.track({ at: Date.now() })
+      })
+    return () => supabase.removeChannel(channel)
+  }, [league.id, session.user.id])
 
   // ---- clock tick ----
   useEffect(() => {
@@ -2050,8 +2200,41 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   const pickInRound = (currentPick % numTeams) + 1
   const canDraftNow = !draftDone && !league.paused && (onClockIsMe || isLeagueAdmin)
 
+  const onClockNeeds = useMemo(() => {
+    if (!onClockTeamId) return ''
+    const counts = {}
+    picks.filter(p => p.team_id === onClockTeamId).forEach(p => {
+      const pos = playersById[p.player_id]?.position
+      if (pos) counts[pos] = (counts[pos] || 0) + 1
+    })
+    const gaps = []
+    ;[['QB', 1], ['RB', 2], ['WR', 2], ['TE', 1], ['K', 1], ['DEF', 1]].forEach(([pos, n]) => {
+      if ((counts[pos] || 0) < n && !gaps.includes(pos)) gaps.push(pos)
+    })
+    return gaps.length ? `needs ${gaps.slice(0, 3).join(', ')}` : 'starters set'
+  }, [onClockTeamId, picks, playersById])
+
+  const displayQueue = queue.filter(id => !draftedSet.has(id) && playersById[id])
+  const toggleQueue = (pid) => {
+    setQueue(q => q.includes(pid) ? q.filter(x => x !== pid) : [...q, pid])
+  }
+  const moveQueue = (pid, dir) => {
+    setQueue(q => {
+      const i = q.indexOf(pid)
+      const j = i + dir
+      if (i < 0 || j < 0 || j >= q.length) return q
+      const next = [...q]
+      ;[next[i], next[j]] = [next[j], next[i]]
+      return next
+    })
+  }
+
   return (
     <>
+      <div className="draft-header">
+        <span className="display" style={{ fontSize: 16 }}>{league.name} · {league.season || CURRENT_SEASON} DRAFT</span>
+        <span className="live-pill">{draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED</span>
+      </div>
       {isMock && (
         <div className="mock-banner" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <span>MOCK DRAFT — bots autopick their turns. You're {teamsById[myTeamId]?.team_name}.</span>
@@ -2085,7 +2268,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
             <>
               <span className="dt-team">{onClockTeam?.team_name || '—'}{onClockIsMe && ' · YOU'}</span>
               <span className="dt-sub">
-                {onClockTeam?.user_name}{league.paused ? ' · PAUSED' : ''}
+                {onClockTeam?.user_name} · {onClockNeeds}{league.paused ? ' · PAUSED' : ''}
               </span>
             </>
           )}
@@ -2144,6 +2327,11 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
                   {p.last_season_pts != null ? `${p.last_season_pts} pts` : '—'}
                 </span>
                 <span className="prank">#{p.adp ?? '—'}</span>
+                <button className={`btn btn-xs ${queue.includes(p.id) ? 'btn-turf' : 'btn-ghost'}`}
+                  title={queue.includes(p.id) ? 'Remove from queue' : 'Add to queue'}
+                  onClick={() => toggleQueue(p.id)}>
+                  {queue.includes(p.id) ? '✓' : '＋'}
+                </button>
                 <button className="btn btn-xs btn-primary" disabled={!canDraftNow || busyPick}
                   onClick={() => manualPick(p.id)}>
                   Draft
@@ -2158,6 +2346,31 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
         </div>
 
         <div>
+          <div className="side-card queue-card">
+            <h3>My queue{displayQueue.length ? ` · ${displayQueue.length}` : ''}</h3>
+            {displayQueue.length === 0 && (
+              <p className="sub" style={{ marginBottom: 0 }}>Tap ＋ on players to line up your targets. Drafted players drop off automatically.</p>
+            )}
+            {displayQueue.map((pid, i) => {
+              const p = playersById[pid]
+              return (
+                <div key={pid} className={`adv-row pos-${p.position}`} style={{ borderLeft: '3px solid transparent', paddingLeft: 6 }}>
+                  <span className="adv-name">{i + 1}. {p.name}</span>
+                  <span className="adv-meta">{p.position} · {p.nfl_team || 'FA'}</span>
+                  <button className="btn btn-xs btn-ghost" onClick={() => moveQueue(pid, -1)} title="Move up">↑</button>
+                  <button className="btn btn-xs btn-ghost" onClick={() => moveQueue(pid, 1)} title="Move down">↓</button>
+                  <button className="btn btn-xs btn-ghost" onClick={() => toggleQueue(pid)} title="Remove">✕</button>
+                </div>
+              )
+            })}
+            {displayQueue.length > 0 && (
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: 10 }}
+                disabled={!canDraftNow || busyPick}
+                onClick={() => manualPick(displayQueue[0])}>
+                DRAFT {playersById[displayQueue[0]]?.name?.toUpperCase()}
+              </button>
+            )}
+          </div>
           <DraftAdvisor
             myPicks={myPicks}
             players={players}
@@ -2625,6 +2838,7 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
   const [playersById, setPlayersById] = useState({})
   const [stats, setStats] = useState({})
   const [matchups, setMatchups] = useState([])
+  const [proj, setProj] = useState({})
   const [lastFetch, setLastFetch] = useState(null)
   const [sim, setSim] = useState(false)
   const [simF, setSimF] = useState(1)
@@ -2676,10 +2890,22 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
         if (mounted) { setStats(normalizeSleeperStats(raw)); setLastFetch(new Date()) }
       } catch { /* transient network issues — next poll retries */ }
     }
-    fetchStats()
+    const fetchProj = async () => {
+      try {
+        const res = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
+        if (!res.ok) return
+        const map = {}
+        Object.entries(normalizeSleeperStats(await res.json())).forEach(([pid, s]) => {
+          const pts = s?.pts_half_ppr ?? s?.pts_std
+          if (typeof pts === 'number') map[pid] = pts
+        })
+        if (mounted) setProj(map)
+      } catch { /* fine */ }
+    }
+    fetchStats(); fetchProj()
     const t = setInterval(fetchStats, 60000)
     return () => { mounted = false; clearInterval(t) }
-  }, [statsYear, statsWeek])
+  }, [statsYear, statsWeek, league.season, week])
 
   // Simulated-live replay: reveal 0% -> 100% of the week's stats over ~3 min
   useEffect(() => {
@@ -2820,24 +3046,73 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
         {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
       </div>
 
-      {myMatchup && (
-        <div className="card">
-          <h2>My starters</h2>
-          {myStarters
-            .sort((a, b) => ROSTER_SLOTS.indexOf(a.slot) - ROSTER_SLOTS.indexOf(b.slot))
-            .map(r => {
-              const p = playersById[r.player_id]
+      {myMatchup && (() => {
+        const oppId = myMatchup.home_team_id === myTeamId ? myMatchup.away_team_id : myMatchup.home_team_id
+        const oppStarters = starterRows.filter(r => r.team_id === oppId)
+        const bySlot = rows => Object.fromEntries(rows.map(r => [r.slot, r]))
+        const mine = bySlot(myStarters), theirs = bySlot(oppStarters)
+        const myScore = teamScore(myTeamId), oppScore = teamScore(oppId)
+        const projOf = tid => Math.round(starterRows.filter(r => r.team_id === tid)
+          .reduce((s, r) => s + (proj[r.player_id] || 0), 0) * 10) / 10
+        const myProj = projOf(myTeamId), oppProj = projOf(oppId)
+        const ytp = rows => rows.filter(r => !stats[r.player_id]).length
+        const d = (myScore + Math.max(myProj - myScore, 0)) - (oppScore + Math.max(oppProj - oppScore, 0))
+        const winPct = Math.min(99, Math.max(1, Math.round(100 / (1 + Math.pow(10, -d / 25)))))
+        return (
+          <div className="card">
+            <div className="hero-top">
+              <span className="adv-label" style={{ margin: 0 }}>Head to head</span>
+              <span className="dt-sub">Week {week}{myMatchup.completed ? ' · FINAL' : ' · IN PROGRESS'}</span>
+            </div>
+            <div className="hero-grid">
+              <div className="hero-side">
+                <div className="hero-team">{teamsById[myTeamId]?.team_name}</div>
+                <div className="hero-score">{myScore.toFixed(1)}</div>
+                <div className="hero-proj">PROJ FINAL {myProj.toFixed(1)} · YET TO PLAY {ytp(myStarters)}</div>
+              </div>
+              <div className="hero-mid">
+                <span className="dt-label">Win prob</span>
+                <div className="winbar"><div className="winbar-fill" style={{ width: `${winPct}%` }} /></div>
+                <span className="hero-win">{winPct} / {100 - winPct}</span>
+              </div>
+              <div className="hero-side away">
+                <div className="hero-team">{teamsById[oppId]?.team_name}</div>
+                <div className="hero-score">{oppScore.toFixed(1)}</div>
+                <div className="hero-proj">PROJ FINAL {oppProj.toFixed(1)} · YET TO PLAY {ytp(oppStarters)}</div>
+              </div>
+            </div>
+            <div className="h2h-thead">
+              <span style={{ flex: 1 }}>{(teamsById[myTeamId]?.user_name || 'ME').toUpperCase()}</span>
+              <span className="h2h-pts">PTS</span>
+              <span className="h2h-slot">POS</span>
+              <span className="h2h-pts">PTS</span>
+              <span style={{ flex: 1, textAlign: 'right' }}>{(teamsById[oppId]?.user_name || 'THEM').toUpperCase()}</span>
+            </div>
+            {ROSTER_SLOTS.map(slot => {
+              const a = mine[slot], b = theirs[slot]
+              const pa = a ? playersById[a.player_id] : null
+              const pb = b ? playersById[b.player_id] : null
+              const apts = a ? playerPts(a.player_id) : 0
+              const bpts = b ? playerPts(b.player_id) : 0
               return (
-                <div key={r.id} className="lineup-row">
-                  <span className="lslot">{r.slot}</span>
-                  <span className="lname">{p?.name || r.player_id}</span>
-                  <span className="lmeta">{p?.position} · {p?.nfl_team || 'FA'}</span>
-                  <span className="lproj">{playerPts(r.player_id).toFixed(1)} pts</span>
+                <div key={slot} className="h2h-row">
+                  <span className="h2h-name">
+                    {pa ? pa.name : '—'}
+                    {pa && <span className="h2h-meta">{pa.nfl_team || 'FA'}{stats[a.player_id] ? '' : ' · yet to play'}{injuryTag(pa) ? ` · ${injuryTag(pa)}` : ''}</span>}
+                  </span>
+                  <span className={`h2h-pts ${apts > bpts ? 'lead' : ''}`}>{a && stats[a.player_id] ? apts.toFixed(1) : '—'}</span>
+                  <span className="h2h-slot">{slot.replace(/[0-9]/g, '')}</span>
+                  <span className={`h2h-pts ${bpts > apts ? 'lead' : ''}`}>{b && stats[b.player_id] ? bpts.toFixed(1) : '—'}</span>
+                  <span className="h2h-name away">
+                    {pb ? pb.name : '—'}
+                    {pb && <span className="h2h-meta">{pb.nfl_team || 'FA'}{stats[b.player_id] ? '' : ' · yet to play'}{injuryTag(pb) ? ` · ${injuryTag(pb)}` : ''}</span>}
+                  </span>
                 </div>
               )
             })}
-        </div>
-      )}
+          </div>
+        )
+      })()}
     </>
   )
 }
@@ -3167,9 +3442,36 @@ function TradesPanel({ league, teams, myTeamId }) {
   const [getIds, setGetIds] = useState([])
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const [coachTake, setCoachTake] = useState({}) // trade_id -> analysis text
+  const [coachBusy, setCoachBusy] = useState(null)
 
   const week = league.current_week || 1
   const teamsById = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams])
+
+  const askCoachAboutTrade = async (tr) => {
+    setCoachBusy(tr.id)
+    const nameLine = pid => {
+      const p = playersById[pid]
+      return p ? `${p.name} (${p.position} ${p.nfl_team || 'FA'}${p.last_season_avg != null ? `, 2025 avg ${p.last_season_avg}` : ''})` : pid
+    }
+    const context =
+      `TRADE ANALYSIS REQUEST — no live draft pick is happening.\n` +
+      `Proposed trade in a 12-team half-PPR league, week ${week}:\n` +
+      `${teamsById[tr.from_team_id]?.team_name} sends: ${(tr.from_player_ids || []).map(nameLine).join('; ')}\n` +
+      `${teamsById[tr.to_team_id]?.team_name} sends: ${(tr.to_player_ids || []).map(nameLine).join('; ')}\n` +
+      `The manager asking is ${teamsById[myTeamId]?.team_name}. Analyze who wins this trade and why, in 60-90 words.`
+    try {
+      const { data, error } = await supabase.functions.invoke('draft-guru', {
+        body: { context, question: 'Who wins this trade, Coach?' },
+      })
+      if (error) throw error
+      setCoachTake(prev => ({ ...prev, [tr.id]: data?.text || 'Coach went quiet.' }))
+    } catch (e) {
+      setCoachTake(prev => ({ ...prev, [tr.id]: `Coach is off the air: ${e.message}` }))
+    }
+    setCoachBusy(null)
+  }
 
   const loadTrades = useCallback(async () => {
     const { data } = await supabase
@@ -3237,6 +3539,7 @@ function TradesPanel({ league, teams, myTeamId }) {
     const { error } = await supabase.from('trades').insert({
       league_id: league.id, from_team_id: myTeamId, to_team_id: targetTeamId,
       from_player_ids: giveIds, to_player_ids: getIds,
+      note: note.trim() ? note.trim().slice(0, 300) : null,
     })
     if (error) setMsg({ t: 'err', v: error.message })
     else { setMsg({ t: 'ok', v: 'Trade proposed — waiting on the other manager.' }); setProposing(false) }
@@ -3283,9 +3586,16 @@ function TradesPanel({ league, teams, myTeamId }) {
             <div style={{ flex: 1 }}>
               <b>{teamsById[tr.from_team_id]?.team_name}</b> sends <b>{names(tr.from_player_ids)}</b>
               {' '}to <b>{teamsById[tr.to_team_id]?.team_name}</b> for <b>{names(tr.to_player_ids)}</b>
+              {tr.note && <div className="fp-body" style={{ fontStyle: 'italic' }}>&ldquo;{tr.note}&rdquo;</div>}
               <div className="bp-meta">
                 {tr.status === 'accepted' ? 'Accepted — commissioner processing…' : incoming ? 'Awaiting your response' : 'Awaiting their response'}
               </div>
+              {coachTake[tr.id] && <div className="coach-say" style={{ marginTop: 8 }}>{coachTake[tr.id]}</div>}
+              <button className="btn btn-xs btn-ghost" style={{ marginTop: 6 }}
+                disabled={coachBusy === tr.id}
+                onClick={() => askCoachAboutTrade(tr)}>
+                {coachBusy === tr.id ? 'Coach is thinking…' : '🏈 Ask Coach to analyze'}
+              </button>
             </div>
             {incoming && (
               <div style={{ display: 'flex', gap: 6 }}>
@@ -3333,6 +3643,10 @@ function TradesPanel({ league, teams, myTeamId }) {
               </div>
             </div>
           )}
+          <div className="field" style={{ marginTop: 10 }}>
+            <input className="input" placeholder="Add a note for them… (optional)" maxLength={300}
+              value={note} onChange={e => setNote(e.target.value)} />
+          </div>
           <div className="admin-actions" style={{ marginTop: 10 }}>
             <button className="btn btn-sm btn-primary" disabled={busy || !targetTeamId} onClick={submitTrade}>
               SEND PROPOSAL ({giveIds.length}-for-{getIds.length})
@@ -3848,10 +4162,16 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
         <span className="lslot">{slot}</span>
         {p ? (
           <>
-            <span className="lname">{p.name}<span className="lmeta" style={{ display: 'block' }}>{p.position} · {p.nfl_team || 'FA'}</span></span>
+            <span className="lname">
+              {p.name}{injuryTag(p) && <span className={`inj-tag ${injuryTag(p) === 'OUT' || injuryTag(p) === 'IR' ? 'bad' : ''}`}>{injuryTag(p)}</span>}
+              <span className="lmeta" style={{ display: 'block' }}>
+                {statLine(stats[p.id], p.position) || `${p.position} · ${p.nfl_team || 'FA'}`}
+                {injuryTag(p) === 'OUT' && ' · swap recommended'}
+              </span>
+            </span>
             <span className="tp-col">{proj[p.id] != null ? proj[p.id].toFixed(1) : '—'}</span>
             <span className="tp-col">{p.last_season_avg != null ? p.last_season_avg.toFixed(1) : '—'}</span>
-            <span className="tp-col tp-pts">{livePts(p.id).toFixed(1)}</span>
+            <span className="tp-col tp-pts">{stats[p.id] ? livePts(p.id).toFixed(1) : '—'}</span>
           </>
         ) : (
           <span className="lmeta">Empty — tap a player, then tap here</span>
@@ -3936,7 +4256,36 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
             <span className="tp-col">PTS</span>
           </div>
         )}
-        {view === 'starters' && ROSTER_SLOTS.map(renderRow)}
+        {view === 'starters' && (
+          <>
+            {ROSTER_SLOTS.map(renderRow)}
+            {(() => {
+              const issues = roster.filter(r => {
+                const p = playersById[r.player_id]
+                return p && ROSTER_SLOTS.includes(r.slot) &&
+                  (!slotAccepts(p.position, r.slot) || injuryTag(p) === 'OUT' || injuryTag(p) === 'IR')
+              }).length
+              const tot = key => ROSTER_SLOTS.reduce((s, slot) => {
+                const row = rowBySlot[slot]
+                if (!row) return s
+                if (key === 'proj') return s + (proj[row.player_id] || 0)
+                if (key === 'avg') return s + (playersById[row.player_id]?.last_season_avg || 0)
+                return s + (stats[row.player_id] ? livePts(row.player_id) : 0)
+              }, 0)
+              return (
+                <div className="lineup-row tot-row">
+                  <span className="lslot">TOT</span>
+                  <span className="lname">
+                    9 starters{issues > 0 && <span className="inj-tag bad">{issues} LINEUP ISSUE{issues > 1 ? 'S' : ''}</span>}
+                  </span>
+                  <span className="tp-col">{tot('proj').toFixed(1)}</span>
+                  <span className="tp-col">{tot('avg').toFixed(1)}</span>
+                  <span className="tp-col tp-pts">{tot('pts').toFixed(1)}</span>
+                </div>
+              )
+            })()}
+          </>
+        )}
         {view === 'bench' && BENCH_SLOTS.map(renderRow)}
         {view === 'season' && (
           myWeeks.length === 0 ? <p className="sub">Finalized weeks will appear here.</p> :
@@ -3967,6 +4316,47 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
 // FEED — recaps of league moves + trash talk (kit's FEED screen)
 // ============================================================
 function FeedScreen({ league, teams, myTeamId, session }) {
+  const isLeagueAdmin = league.admin_id === session.user.id || session.user.email === ADMIN_EMAIL
+  const [recapBusy, setRecapBusy] = useState(false)
+
+  const generateRecap = async () => {
+    setRecapBusy(true)
+    try {
+      const { data: done } = await supabase.from('matchups').select('*')
+        .eq('league_id', league.id).eq('completed', true).eq('is_playoff', false)
+      if (!done || done.length === 0) throw new Error('No finalized weeks yet — finalize a week first.')
+      const wk = Math.max(...done.map(m => m.week))
+      const wkGames = done.filter(m => m.week === wk)
+      const tName = id => teams.find(t => t.id === id)?.team_name || '?'
+      const results = wkGames.map(m =>
+        `${tName(m.home_team_id)} ${m.home_score.toFixed(1)} — ${m.away_score.toFixed(1)} ${tName(m.away_team_id)}`
+      ).join('\n')
+      const high = wkGames.reduce((best, m) => {
+        const top = m.home_score >= m.away_score
+          ? { team: tName(m.home_team_id), pts: m.home_score }
+          : { team: tName(m.away_team_id), pts: m.away_score }
+        return !best || top.pts > best.pts ? top : best
+      }, null)
+      const context =
+        `WEEK RECAP REQUEST — no live draft pick is happening.\n` +
+        `Week ${wk} final results in our 12-team half-PPR office league:\n${results}\n` +
+        `Highest score: ${high?.team} with ${high?.pts.toFixed(1)}.\n` +
+        `Write a punchy, funny 4-6 sentence recap of the week. Reference real teams and scores above only.`
+      const { data, error } = await supabase.functions.invoke('draft-guru', {
+        body: { context, question: `Give us the week ${wk} recap, Coach!` },
+      })
+      if (error) throw error
+      if (!data?.text) throw new Error('Coach went quiet.')
+      await supabase.from('feed_posts').insert({
+        league_id: league.id, user_id: session.user.id,
+        user_name: 'Coach Sunday', team_name: `WEEK ${wk} RECAP`,
+        body: data.text.slice(0, 500),
+      })
+    } catch (e) {
+      window.alert(`Recap failed: ${e.message}`)
+    }
+    setRecapBusy(false)
+  }
   const [posts, setPosts] = useState([])
   const [txns, setTxns] = useState([])
   const [body, setBody] = useState('')
@@ -4002,8 +4392,10 @@ function FeedScreen({ league, teams, myTeamId, session }) {
     const chat = posts.map(p => ({ kind: 'chat', at: p.created_at, p }))
     const moves = txns.map(t => ({ kind: 'move', at: t.created_at, t }))
     const merged = [...chat, ...moves].sort((a, b) => new Date(b.at) - new Date(a.at))
+    const isRecap = i => i.kind === 'chat' && (i.p.team_name || '').includes('RECAP')
     if (filter === 'moves') return merged.filter(i => i.kind === 'move')
-    if (filter === 'chat') return merged.filter(i => i.kind === 'chat')
+    if (filter === 'recaps') return merged.filter(isRecap)
+    if (filter === 'chat') return merged.filter(i => i.kind === 'chat' && !isRecap(i))
     return merged
   }, [posts, txns, filter])
 
@@ -4035,7 +4427,7 @@ function FeedScreen({ league, teams, myTeamId, session }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h2 style={{ marginBottom: 0 }}>League feed</h2>
         <div className="tabs" style={{ margin: 0 }}>
-          {['all', 'moves', 'chat'].map(f => (
+          {['all', 'recaps', 'moves', 'chat'].map(f => (
             <button key={f} className={`tab ${filter === f ? 'on' : ''}`}
               style={{ padding: '6px 12px', fontSize: 12 }}
               onClick={() => setFilter(f)}>{f}</button>
@@ -4043,6 +4435,13 @@ function FeedScreen({ league, teams, myTeamId, session }) {
         </div>
       </div>
 
+      {isLeagueAdmin && (
+        <div className="admin-actions" style={{ marginTop: 12 }}>
+          <button className="btn btn-sm btn-mock" disabled={recapBusy} onClick={generateRecap}>
+            {recapBusy ? 'Coach is writing…' : '🏈 Coach: write the week recap'}
+          </button>
+        </div>
+      )}
       <div className="field" style={{ margin: '14px 0' }}>
         <input className="input" placeholder="Say something…" maxLength={500}
           value={body} onChange={e => setBody(e.target.value)}
@@ -4175,4 +4574,47 @@ function PreDraftCoach({ league, teams, myTeamId }) {
   }
 
   return <CoachCard buildContext={buildContext} />
+}
+
+// ============================================================
+// RULES CARD — read-only league settings reference
+// ============================================================
+function RulesCard() {
+  const [open, setOpen] = useState(false)
+  const rows = [
+    ['Passing yards', '0.04 / yd'], ['Passing TD', '4.0'], ['Interception', '−2.0'],
+    ['Rush / rec yards', '0.1 / yd'], ['Rush / rec TD', '6.0'], ['Reception', '0.5 (half-PPR)'],
+    ['Fumble lost', '−2.0'], ['2-pt conversion', '2.0'],
+    ['FG 0–39', '3.0'], ['FG 40–49', '4.0'], ['FG 50+', '5.0'], ['XP', '1.0'],
+    ['DEF sack', '1.0'], ['DEF INT', '2.0'], ['DEF fumble rec', '2.0'], ['DEF TD', '6.0'], ['Safety', '2.0'],
+    ['DEF 0 pts allowed', '+10'], ['DEF 1–6', '+7'], ['DEF 7–13', '+4'], ['DEF 14–20', '+1'],
+    ['DEF 21–27', '0'], ['DEF 28–34', '−1'], ['DEF 35+', '−4'],
+  ]
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ marginBottom: 0 }}>League rules</h2>
+        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show'}</button>
+      </div>
+      {open && (
+        <>
+          <p className="sub" style={{ marginTop: 10 }}>
+            12 teams · Snake draft, 16 rounds, 90-second clock · Lineup: QB, RB×2, WR×2, TE, FLEX (RB/WR/TE), K, DEF + 7 bench ·
+            Free agency: first come, first served · Trades: even swaps up to 3-for-3, executed on acceptance ·
+            Playoffs: top 6, weeks 14–16, seeds 1–2 get byes · Tiebreaker: points for.
+          </p>
+          <div className="board-scroll">
+            <table className="board" style={{ minWidth: 420 }}>
+              <thead><tr><th>Stat</th><th>Points</th></tr></thead>
+              <tbody>
+                {rows.map(([k, v]) => (
+                  <tr key={k}><td className="filled">{k}</td><td>{v}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
