@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.7' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v8.8' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -729,6 +729,13 @@ select.input { appearance: none; }
   .pool-controls .input { min-width: 140px; }
   .bb-grid { min-width: 900px; }
 }
+
+.rename-btn {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--faint); font-size: 13px; margin-left: 6px; padding: 2px 4px;
+}
+.rename-btn:hover { color: var(--orange); }
+.fp-body { white-space: pre-wrap; }
 
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
@@ -1629,13 +1636,33 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 // LEAGUE HOME
 // ============================================================
 function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, onEnterMock, onExitMock, reloadTop, setTab }) {
+  const [renaming, setRenaming] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
+
+  const saveRename = async () => {
+    const name = newName.trim()
+    if (!name || renameBusy) return
+    setRenameBusy(true)
+    const { error } = await supabase.from('teams')
+      .update({ team_name: name.slice(0, 40) }).eq('id', myTeamId)
+    if (!error) setRenaming(false)
+    else window.alert(`Rename failed: ${error.message}`)
+    setRenameBusy(false)
+  }
+
   return (
     <>
       {league.status === 'active' && (
         <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} onStandings={() => setTab && setTab('standings')} />
       )}
       {(league.status === 'setup' || league.status === 'locked') && !isMock && (
-        <DraftCountdown league={league} teams={teams} />
+        <>
+          <DraftCountdown league={league} teams={teams} />
+          {league.draft_order && (
+            <DraftOrderCard league={league} teams={teams} myTeamId={myTeamId} />
+          )}
+        </>
       )}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -1671,8 +1698,25 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
         <div className="teams-grid">
           {teams.map((t, i) => (
             <div key={t.id} className={`team-slot ${t.id === myTeamId ? 'mine' : ''}`}>
-              <div className="num">TEAM {String(i + 1).padStart(2, '0')}</div>
-              <div className="tname">{t.team_name}</div>
+              <div className="num">TEAM {String(i + 1).padStart(2, '0')}{t.id === myTeamId ? ' · YOU' : ''}</div>
+              {t.id === myTeamId && renaming ? (
+                <div className="field" style={{ marginTop: 4 }}>
+                  <input className="input" style={{ minWidth: 0, padding: '7px 10px', fontSize: 13 }}
+                    maxLength={40} value={newName} autoFocus
+                    onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') setRenaming(false) }} />
+                  <button className="btn btn-xs btn-primary" disabled={renameBusy} onClick={saveRename}>Save</button>
+                  <button className="btn btn-xs btn-ghost" onClick={() => setRenaming(false)}>✕</button>
+                </div>
+              ) : (
+                <div className="tname">
+                  {t.team_name}
+                  {t.id === myTeamId && (
+                    <button className="rename-btn" title="Rename your team"
+                      onClick={() => { setNewName(t.team_name); setRenaming(true) }}>✎</button>
+                  )}
+                </div>
+              )}
               <div className="uname">{t.user_name}</div>
             </div>
           ))}
@@ -1750,6 +1794,17 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       ;[ids[i], ids[j]] = [ids[j], ids[i]]
     }
     await supabase.from('leagues').update({ draft_order: ids, current_pick: 0 }).eq('id', league.id)
+    // Reveal: post the order to the league feed (real league only)
+    if (!isMock) {
+      const byId = Object.fromEntries(teams.map(t => [t.id, t]))
+      const body = ids.map((id, i) =>
+        `${i + 1}. ${byId[id]?.team_name || '?'} (${byId[id]?.user_name || '?'})`).join('\n')
+      await supabase.from('feed_posts').insert({
+        league_id: league.id, user_id: session.user.id,
+        user_name: 'Commissioner', team_name: 'DRAFT ORDER REVEAL',
+        body: `The draft order is set. Round 1 goes:\n${body}\n(Snake format — round 2 reverses.)`,
+      })
+    }
     setBusy(false)
   }
 
@@ -2060,8 +2115,8 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
             )}
           </>
         )}
-        <button className="btn" disabled={busy || (!isMock && league.status === 'setup')} onClick={randomizeOrder}>
-          {league.draft_order ? 'Re-randomize draft order' : 'Randomize draft order'}
+        <button className="btn" disabled={busy} onClick={randomizeOrder}>
+          {league.draft_order ? 'Re-randomize & reveal order' : 'Randomize & reveal draft order'}
         </button>
         <button className="btn btn-primary" disabled={busy || !canStart} onClick={startDraft}>
           Start draft ({teams.length}/{MAX_TEAMS} teams)
@@ -2086,7 +2141,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       </div>
 
       {!isMock && league.status === 'setup' && (
-        <p className="msg">Lock the league before randomizing the order and starting the draft.</p>
+        <p className="msg">You can randomize & reveal the order any time — but re-randomize if anyone joins after, and lock the league before starting the draft.</p>
       )}
 
       {orderNames && (
@@ -4886,6 +4941,30 @@ function DraftCountdown({ league, teams }) {
             {new Date(at).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             {' '}· Snake · 16 rounds · 90s clock · Half-PPR
           </p>
+          <button className="btn btn-xs" style={{ marginTop: 10 }} onClick={() => {
+            const fmt = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+            const start = new Date(at)
+            const end = new Date(start.getTime() + 2 * 3600000)
+            const ics = [
+              'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//BOL Fantasy Football//EN',
+              'BEGIN:VEVENT',
+              `UID:bolff-draft-${league.id}`,
+              `DTSTAMP:${fmt(new Date())}`,
+              `DTSTART:${fmt(start)}`,
+              `DTEND:${fmt(end)}`,
+              `SUMMARY:${(league.name || 'BOL Fantasy Football')} — Draft Night 🏈`,
+              `DESCRIPTION:Snake draft\\, 16 rounds\\, 90-second clock. Be there: ${APP_URL}`,
+              'END:VEVENT', 'END:VCALENDAR',
+            ].join('\r\n')
+            const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(blob)
+            a.download = 'bol-draft-night.ics'
+            a.click()
+            URL.revokeObjectURL(a.href)
+          }}>
+            📅 Add to calendar
+          </button>
         </>
       )}
     </div>
@@ -4989,6 +5068,40 @@ function RulesCard() {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// ============================================================
+// DRAFT ORDER CARD — revealed order in the waiting room
+// ============================================================
+function DraftOrderCard({ league, teams, myTeamId }) {
+  const byId = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams])
+  const order = league.draft_order || []
+  const stale = order.length !== teams.length
+  const myPick = order.indexOf(myTeamId) + 1
+
+  return (
+    <div className="card">
+      <div className="hero-top">
+        <span className="adv-label" style={{ margin: 0 }}>Draft order · revealed</span>
+        {myPick > 0 && <span className="week-chip">YOU PICK {myPick}{myPick === 1 ? 'ST' : myPick === 2 ? 'ND' : myPick === 3 ? 'RD' : 'TH'}</span>}
+      </div>
+      {stale && (
+        <div className="lock-banner" style={{ marginBottom: 10 }}>
+          Teams have joined since this order was set — the commissioner will re-randomize before the draft.
+        </div>
+      )}
+      {order.map((id, i) => (
+        <div key={id} className="lineup-row" style={id === myTeamId ? { borderColor: 'var(--orange)', background: 'rgba(248,94,50,0.08)' } : undefined}>
+          <span className="lslot">{i + 1}</span>
+          <span className="lname">{byId[id]?.team_name || '?'}
+            <span className="lmeta" style={{ display: 'block' }}>{byId[id]?.user_name || ''}</span></span>
+          {i === 0 && <span className="inj-tag" style={{ color: 'var(--lime)' }}>FIRST PICK</span>}
+          {i === order.length - 1 && <span className="inj-tag">BACK-TO-BACK TURN</span>}
+        </div>
+      ))}
+      <p className="sub" style={{ marginTop: 8 }}>Snake format — round 2 runs in reverse, so pick 12 gets back-to-back selections.</p>
     </div>
   )
 }
