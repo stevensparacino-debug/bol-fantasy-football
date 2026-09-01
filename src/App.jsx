@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.3' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.4' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1683,11 +1683,14 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
             <h2 style={{ fontSize: 36 }}>{league.name}</h2>
             <span className={`pill ${isMock ? 'mock' : league.status}`}>{isMock ? `mock · ${league.status}` : league.status}</span>
           </div>
-          {isLeagueAdmin && !isMock && (
+          {isLeagueAdmin && (
             <div style={{ textAlign: 'right' }}>
-              <p className="sub" style={{ marginBottom: 6 }}>Share this code:</p>
+              <p className="sub" style={{ marginBottom: 6 }}>
+                {isMock ? 'Test accounts join with:' : 'Share this code:'}
+              </p>
               <div className="code-chip">{league.join_code}</div>
               <div>
+                {!isMock && (
                 <button className="btn btn-xs btn-ghost" style={{ marginTop: 6 }}
                   onClick={async () => {
                     const msg = `🏈 ${league.name} — claim your spot!\n` +
@@ -1702,6 +1705,7 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
                   }}>
                   Copy invite message
                 </button>
+                )}
               </div>
             </div>
           )}
