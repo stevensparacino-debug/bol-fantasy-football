@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v8.9' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.3' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -39,6 +39,9 @@ const SLOT_ELIG = {
   QB: ['QB'], RB1: ['RB'], RB2: ['RB'], WR1: ['WR'], WR2: ['WR'],
   TE: ['TE'], FLEX: ['RB', 'WR', 'TE'], K: ['K'], DEF: ['DEF'],
 }
+const isCoAdmin = (league, userId) =>
+  Array.isArray(league?.co_admins) && league.co_admins.includes(userId)
+
 const slotAccepts = (position, slot) =>
   slot.startsWith('BN') ? true : (SLOT_ELIG[slot] || []).includes(position)
 
@@ -1193,7 +1196,8 @@ function App() {
         )}
 
         {session && view === 'home' && !realTeam && (
-          <Lobby session={session} isAdmin={isAdmin} onDone={loadMyLeagues} />
+          <Lobby session={session} isAdmin={isAdmin} onDone={loadMyLeagues}
+            mockLeague={mockLeague} onEnterMock={() => setView('mock')} />
         )}
         {session && view === 'home' && realTeam && realLeague && (
           <LeagueView
@@ -1232,7 +1236,7 @@ function LoginScreen({ onLogin }) {
 // ============================================================
 // LOBBY
 // ============================================================
-function Lobby({ session, isAdmin, onDone }) {
+function Lobby({ session, isAdmin, onDone, mockLeague, onEnterMock }) {
   const [joinCode, setJoinCode] = useState(() => {
     try { return localStorage.getItem('bolff_join') || '' } catch { return '' }
   })
@@ -1249,7 +1253,7 @@ function Lobby({ session, isAdmin, onDone }) {
     let cancelled = false
     ;(async () => {
       const { data: lg } = await supabase.from('leagues').select('*')
-        .eq('join_code', code).eq('is_mock', false).maybeSingle()
+        .eq('join_code', code).maybeSingle()
       if (cancelled || !lg) { if (!cancelled) setInvite(null); return }
       const { data: members } = await supabase.from('teams')
         .select('user_name, team_name, user_id').eq('league_id', lg.id)
@@ -1292,7 +1296,7 @@ function Lobby({ session, isAdmin, onDone }) {
     setBusy(true); setMsg(null)
     const { data: lg } = await supabase
       .from('leagues').select('*')
-      .eq('join_code', code).eq('is_mock', false)
+      .eq('join_code', code)
       .maybeSingle()
     if (!lg) { setMsg({ t: 'err', v: 'No league found with that code.' }); setBusy(false); return }
     if (lg.status !== 'setup') { setMsg({ t: 'err', v: 'This league is locked — joining is closed.' }); setBusy(false); return }
@@ -1314,6 +1318,13 @@ function Lobby({ session, isAdmin, onDone }) {
 
   return (
     <>
+      {mockLeague && (
+        <div className="card mock-card">
+          <h2>Mock league</h2>
+          <p className="sub">You're in a practice league. It auto-opens when the draft starts, or enter now.</p>
+          <button className="btn btn-mock btn-sm" onClick={onEnterMock}>Enter mock league</button>
+        </div>
+      )}
       <div className="card">
         <h2>Join the League</h2>
         <p className="sub">Got a join code from the commissioner? Enter it below.</p>
@@ -1324,7 +1335,9 @@ function Lobby({ session, isAdmin, onDone }) {
 
         {invite ? (
           <div className="invite-card">
-            <p className="adv-label" style={{ margin: '4px 0 2px' }}>You have been invited</p>
+            <p className="adv-label" style={{ margin: '4px 0 2px' }}>
+              You have been invited{invite.league.is_mock && <span className="pill mock" style={{ marginLeft: 8 }}>mock · practice</span>}
+            </p>
             <h2 style={{ fontSize: 28, marginBottom: 4 }}>{invite.league.name}</h2>
             <p className="sub" style={{ marginBottom: 12 }}>
               {invite.commish ? `${invite.commish} invited you to the ${invite.league.season || CURRENT_SEASON} season.` : `Join the ${invite.league.season || CURRENT_SEASON} season.`}
@@ -1395,7 +1408,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   // the final pick flips the league to 'active'.)
   useEffect(() => {
     if (!league || league.status !== 'active' || teams.length === 0) return
-    const amAdmin = isAdmin || league.admin_id === session.user.id
+    const amAdmin = isAdmin || league.admin_id === session.user.id || isCoAdmin(league, session.user.id)
     if (!amAdmin || finalizedRef.current) return
     ;(async () => {
       const { count } = await supabase
@@ -1447,7 +1460,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 
   useEffect(() => {
     if (!league || league.status !== 'active') return
-    const amAdmin = isAdmin || league.admin_id === session.user.id
+    const amAdmin = isAdmin || league.admin_id === session.user.id || isCoAdmin(league, session.user.id)
     if (!amAdmin) return
     ;(async () => {
       const { data: accepted } = await supabase
@@ -1541,7 +1554,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 
   if (!league) return <p>Loading league…</p>
 
-  const isLeagueAdmin = isAdmin || league.admin_id === session.user.id
+  const isLeagueAdmin = isAdmin || league.admin_id === session.user.id || isCoAdmin(league, session.user.id)
   const drafting = league.status === 'drafting'
   const active = league.status === 'active'
   const preDraft = league.status === 'setup' || league.status === 'locked'
@@ -1757,6 +1770,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
   const [busy, setBusy] = useState(false)
   const [playerCount, setPlayerCount] = useState(null)
   const [mockMsg, setMockMsg] = useState(null)
+  const [botCount, setBotCount] = useState('11')
 
   useEffect(() => {
     supabase.from('players').select('id', { count: 'exact', head: true })
@@ -1769,6 +1783,14 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     const pad = n => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
   })
+  const [calUrlInput, setCalUrlInput] = useState(league.calendar_event_url || '')
+  const saveCalUrl = async () => {
+    const url = calUrlInput.trim()
+    if (url && !/^https:\/\//.test(url)) { window.alert('That needs to be a full https:// link.'); return }
+    await supabase.from('leagues')
+      .update({ calendar_event_url: url || null }).eq('id', league.id)
+  }
+
   const saveDraftAt = async () => {
     if (!draftAtInput) return
     await supabase.from('leagues')
@@ -1851,7 +1873,31 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
         if (error) throw error
         setSeedMsg({ t: 'ok', v: `Upserting… ${Math.min(i + CHUNK, rows.length)} / ${rows.length}` })
       }
-      setSeedMsg({ t: 'ok', v: `Done — ${rows.length} players seeded.` })
+      // Retire players who no longer pass Sleeper's draftable filter (cut,
+      // retired, or de-ranked since the last seed) — otherwise they linger
+      // with stale teams/ranks and stay draftable forever.
+      setSeedMsg({ t: 'ok', v: 'Cleaning up cut and retired players…' })
+      const freshIds = new Set(rows.map(r => r.id))
+      let retired = 0
+      for (let from = 0; ; from += 1000) {
+        const { data: page, error: pgErr } = await supabase
+          .from('players').select('*')
+          .order('id', { ascending: true })
+          .range(from, from + 999)
+        if (pgErr) throw pgErr
+        if (!page || page.length === 0) break
+        const stale = page
+          .filter(p => !freshIds.has(String(p.id)) && (p.nfl_team != null || p.adp != null))
+          .map(p => ({ ...p, nfl_team: null, adp: null, status: 'inactive' }))
+        if (stale.length > 0) {
+          const { error: stErr } = await supabase.from('players')
+            .upsert(stale, { onConflict: 'id' })
+          if (stErr) throw stErr
+          retired += stale.length
+        }
+        if (page.length < 1000) break
+      }
+      setSeedMsg({ t: 'ok', v: `Done — ${rows.length} players seeded${retired > 0 ? `, ${retired} cut/retired players removed from the pool` : ''}.` })
     } catch (err) {
       setSeedMsg({ t: 'err', v: `Seed failed: ${err.message}` })
     }
@@ -1938,7 +1984,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
         league_id: lg.id, user_id: session.user.id,
         user_name: displayName, team_name: 'My Mock Team',
       }]
-      BOT_NAMES.forEach((bn, i) => {
+      BOT_NAMES.slice(0, Math.min(11, Math.max(0, parseInt(botCount) || 0))).forEach((bn, i) => {
         rows.push({
           league_id: lg.id,
           user_id: crypto.randomUUID(), // bot identity — never signs in
@@ -1948,7 +1994,8 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       })
       const { error: tErr } = await supabase.from('teams').insert(rows)
       if (tErr) throw tErr
-      setMockMsg({ t: 'ok', v: 'Mock league ready — 12 teams (you + 11 bots).' })
+      const n = Math.min(11, Math.max(0, parseInt(botCount) || 0))
+      setMockMsg({ t: 'ok', v: `Mock league ready — you + ${n} bots. ${n < 11 ? `Share the mock's join code with test accounts to fill the remaining human seats before starting.` : ''}` })
       await reloadTop()
       onEnterMock && onEnterMock()
     } catch (err) {
@@ -2111,6 +2158,16 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
                 {league.draft_at && (
                   <button className="btn btn-ghost btn-sm" disabled={busy} onClick={clearDraftAt}>Clear date</button>
                 )}
+                <input
+                  className="input" type="url" placeholder="Google Calendar event link (optional)"
+                  style={{ maxWidth: 280, flex: 'none', padding: '8px 10px' }}
+                  value={calUrlInput}
+                  onChange={e => setCalUrlInput(e.target.value)}
+                  aria-label="Calendar event link"
+                />
+                <button className="btn" disabled={busy} onClick={saveCalUrl}>
+                  {league.calendar_event_url ? 'Update event link' : 'Save event link'}
+                </button>
               </>
             )}
           </>
@@ -2203,6 +2260,37 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       {!isMock && (
         <>
           <hr className="divider" />
+          <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Co-commissioner</h3>
+          <p className="sub">
+            A co-commissioner has every power you have — start the draft, finalize weeks, process trades,
+            override rosters. Appoint someone you trust (and who won't rig their own matchup).
+          </p>
+          {teams.filter(t => t.user_id !== league.admin_id).map(t => {
+            const isCo = (league.co_admins || []).includes(t.user_id)
+            return (
+              <div key={t.id} className="lineup-row">
+                <span className="lname">{t.team_name}
+                  <span className="lmeta" style={{ display: 'block' }}>{t.user_name}{isCo ? ' · CO-COMMISSIONER' : ''}</span></span>
+                <button className={`btn btn-xs ${isCo ? 'btn-ghost' : 'btn-turf'}`} disabled={busy}
+                  onClick={async () => {
+                    setBusy(true)
+                    const cur = league.co_admins || []
+                    const next = isCo ? cur.filter(x => x !== t.user_id) : [...cur, t.user_id]
+                    const { error } = await supabase.from('leagues')
+                      .update({ co_admins: next }).eq('id', league.id)
+                    if (error) window.alert(`Failed: ${error.message}`)
+                    setBusy(false)
+                  }}>
+                  {isCo ? 'Remove' : 'Make co-commish'}
+                </button>
+              </div>
+            )
+          })}
+          {teams.filter(t => t.user_id !== league.admin_id).length === 0 && (
+            <p className="sub">Appears once other managers have joined.</p>
+          )}
+
+          <hr className="divider" />
           <h3 className="display" style={{ fontSize: 20, marginBottom: 8, color: 'var(--mock)' }}>Mock Draft (practice)</h3>
           <p className="sub">
             Spin up a private practice league — you + 11 autopicking bots — to test the full draft
@@ -2210,9 +2298,18 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
           </p>
           <div className="admin-actions">
             {onEnterMock && !busy && (
-              <button className="btn btn-mock" onClick={createMock} disabled={busy}>
-                Start a mock draft
-              </button>
+              <>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  Bots:
+                  <input className="input" type="number" min="0" max="11"
+                    style={{ maxWidth: 70, flex: 'none', padding: '8px 10px' }}
+                    value={botCount} onChange={e => setBotCount(e.target.value)}
+                    aria-label="Number of bot teams" />
+                </label>
+                <button className="btn btn-mock" onClick={createMock} disabled={busy}>
+                  Start a mock draft
+                </button>
+              </>
             )}
           </div>
           {mockMsg && <p className={`msg ${mockMsg.t}`}>{mockMsg.v}</p>}
@@ -2260,7 +2357,9 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     : null
   const onClockTeam = onClockTeamId ? teamsById[onClockTeamId] : null
   const onClockIsMe = onClockTeamId === myTeamId
-  const onClockIsBot = isMock && onClockTeam && onClockTeam.user_id !== session.user.id
+  // Bots are identified by name, not by "not me" — so real humans can join a
+  // mock for rehearsal without the admin's client autopicking their turns.
+  const onClockIsBot = isMock && onClockTeam && (onClockTeam.user_name || '').startsWith('Bot ')
 
   // ---- data loads ----
   useEffect(() => {
@@ -4734,7 +4833,7 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
 // FEED — recaps of league moves + trash talk (kit's FEED screen)
 // ============================================================
 function FeedScreen({ league, teams, myTeamId, session }) {
-  const isLeagueAdmin = league.admin_id === session.user.id || session.user.email === ADMIN_EMAIL
+  const isLeagueAdmin = league.admin_id === session.user.id || session.user.email === ADMIN_EMAIL || isCoAdmin(league, session.user.id)
   const [recapBusy, setRecapBusy] = useState(false)
 
   const generateRecap = async () => {
@@ -4941,6 +5040,12 @@ function DraftCountdown({ league, teams }) {
             {new Date(at).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             {' '}· Snake · 16 rounds · 90s clock · Half-PPR
           </p>
+          {league.calendar_event_url ? (
+            <button className="btn btn-xs btn-primary" style={{ marginTop: 10 }}
+              onClick={() => window.open(league.calendar_event_url, '_blank', 'noopener')}>
+              📅 RSVP — join the draft event
+            </button>
+          ) : (
           <button className="btn btn-xs" style={{ marginTop: 10 }} onClick={() => {
             const fmt = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
             const start = new Date(at)
@@ -4953,6 +5058,7 @@ function DraftCountdown({ league, teams }) {
           }}>
             📅 Add to Google Calendar
           </button>
+          )}
         </>
       )}
     </div>
