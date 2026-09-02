@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.9' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.10' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -751,6 +751,15 @@ select.input { appearance: none; }
 }
 .rename-btn:hover { color: var(--orange); }
 .fp-body { white-space: pre-wrap; }
+
+/* ---------- v9.10: draft peek banner ---------- */
+.draft-peek-banner {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--orange); color: var(--on-accent);
+  padding: 10px 16px; border-radius: 8px; margin-bottom: 14px;
+  cursor: pointer; font-weight: 700; font-size: 13px; letter-spacing: 0.04em;
+}
+.draft-peek-banner:hover { filter: brightness(1.08); }
 
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
@@ -1575,6 +1584,9 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   const drafting = league.status === 'drafting'
   const active = league.status === 'active'
   const preDraft = league.status === 'setup' || league.status === 'locked'
+  const [draftSubview, setDraftSubview] = useState('draft') // 'draft' | 'league' | 'feed'
+  // Auto-return to draft when draft room is entered
+  useEffect(() => { if (drafting) setDraftSubview('draft') }, [drafting])
 
   return (
     <>
@@ -1599,9 +1611,12 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         <nav className="bottom-nav">
           {drafting ? (
             <>
-              <button className="bn-item on">🏈 Draft</button>
-              <button className="bn-item" onClick={() => setTab('home')}>League</button>
-              <button className="bn-item" onClick={() => setTab('feed')}>Feed</button>
+              <button className={`bn-item ${draftSubview==='draft'?'on':''}`}
+                onClick={() => setDraftSubview('draft')}>🏈 Draft</button>
+              <button className={`bn-item ${draftSubview==='league'?'on':''}`}
+                onClick={() => setDraftSubview('league')}>League</button>
+              <button className={`bn-item ${draftSubview==='feed'?'on':''}`}
+                onClick={() => setDraftSubview('feed')}>Feed</button>
             </>
           ) : [
             ['home', 'League'], ['team', 'Team'], ['scores', 'Matchup'],
@@ -1614,7 +1629,28 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         </nav>
       )}
 
-      {drafting ? (
+      {drafting && draftSubview !== 'draft' && (
+        <div className="draft-peek-banner" onClick={() => setDraftSubview('draft')}>
+          <span>🏈 DRAFT IN PROGRESS — tap to return</span>
+          {(() => {
+            const onId = league.draft_order?.[
+              (() => { const n = league.current_pick ?? 0; const nt = league.draft_order?.length || teams.length; const r = Math.floor(n/nt); return r%2===0 ? n%nt : nt-1-n%nt })()
+            ]
+            const t = teams.find(t => t.id === onId)
+            return t ? <span className="dt-sub">On the clock: {t.team_name}</span> : null
+          })()}
+        </div>
+      )}
+      {drafting && draftSubview === 'feed' && (
+        <FeedScreen league={league} teams={teams} myTeamId={resolvedTeamId} session={session} />
+      )}
+      {drafting && draftSubview === 'league' && (
+        <LeagueHome league={league} teams={teams} myTeamId={resolvedTeamId}
+          isLeagueAdmin={isLeagueAdmin} isMock={isMock} session={session}
+          onEnterMock={onEnterMock} onExitMock={onExitMock} reloadTop={reloadTop}
+          setTab={v => { setTab(v); setDraftSubview('draft') }} />
+      )}
+      {drafting && draftSubview === 'draft' ? (
         <DraftRoom
           session={session}
           league={league}
@@ -2657,8 +2693,6 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
       <div className="draft-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="display" style={{ fontSize: 16 }}>{league.name} · {league.season || CURRENT_SEASON} DRAFT</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="live-pill">{draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED</span>
         </div>
       </div>
