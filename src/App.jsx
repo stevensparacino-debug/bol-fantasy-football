@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.4' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.5' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1554,6 +1554,11 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 
   if (!league) return <p>Loading league…</p>
 
+  // If myTeamId is null (e.g. non-admin just joined a mock and app state
+  // hasn't refreshed yet), find their team from the live teams array.
+  const resolvedTeamId = myTeamId ||
+    teams.find(t => t.user_id === session.user.id)?.id || null
+
   const isLeagueAdmin = isAdmin || league.admin_id === session.user.id || isCoAdmin(league, session.user.id)
   const drafting = league.status === 'drafting'
   const active = league.status === 'active'
@@ -1596,7 +1601,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           session={session}
           league={league}
           teams={teams}
-          myTeamId={myTeamId}
+          myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin}
           isMock={isMock}
         />
@@ -1604,34 +1609,34 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         <TeamPage2
           league={league}
           teams={teams}
-          myTeamId={myTeamId}
+          myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin}
         />
       ) : active && tab === 'scores' ? (
         <Scoreboard
           league={league}
           teams={teams}
-          myTeamId={myTeamId}
+          myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin}
         />
       ) : active && tab === 'players' ? (
         <FreeAgents
           league={league}
           teams={teams}
-          myTeamId={myTeamId}
+          myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin}
         />
       ) : active && tab === 'standings' ? (
-        <Standings league={league} teams={teams} myTeamId={myTeamId} isLeagueAdmin={isLeagueAdmin} />
+        <Standings league={league} teams={teams} myTeamId={resolvedTeamId} isLeagueAdmin={isLeagueAdmin} />
       ) : (active || preDraft) && tab === 'feed' ? (
-        <FeedScreen league={league} teams={teams} myTeamId={myTeamId} session={session} />
+        <FeedScreen league={league} teams={teams} myTeamId={resolvedTeamId} session={session} />
       ) : preDraft && tab !== 'home' ? (
         <ComingSoon tab={tab} league={league} onHome={() => setTab('home')} />
       ) : (
         <LeagueHome
           league={league}
           teams={teams}
-          myTeamId={myTeamId}
+          myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin}
           isMock={isMock}
           session={session}
