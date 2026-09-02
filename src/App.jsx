@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.5' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.6' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1841,6 +1841,22 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
 
   const startDraft = async () => {
     setBusy(true)
+    // Verify draft_order includes every current team — if anyone joined after
+    // the last randomize (or no order was set at all), rebuild it now so
+    // nobody is invisible to the pick engine.
+    const teamIds = teams.map(t => t.id)
+    const order = league.draft_order || []
+    const allPresent = teamIds.length === order.length && teamIds.every(id => order.includes(id))
+    let finalOrder = order
+    if (!allPresent) {
+      finalOrder = [...teamIds]
+      for (let i = finalOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[finalOrder[i], finalOrder[j]] = [finalOrder[j], finalOrder[i]]
+      }
+      await supabase.from('leagues')
+        .update({ draft_order: finalOrder }).eq('id', league.id)
+    }
     const deadline = new Date(Date.now() + DRAFT_PICK_TIMER * 1000).toISOString()
     await supabase.from('leagues').update({
       status: 'drafting', current_pick: 0, paused: false, pick_deadline: deadline,
@@ -2206,8 +2222,21 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
         )}
       </div>
 
+      {(() => {
+        const order = league.draft_order || []
+        const ids = teams.map(t => t.id)
+        const stale = order.length > 0 && (order.length !== ids.length || ids.some(id => !order.includes(id)))
+        const missing = order.length === 0 && ids.length > 0
+        return (stale || missing) ? (
+          <p className="msg" style={{ color: 'var(--yellow)' }}>
+            ⚠️ {missing
+              ? 'Draft order not set — it will be auto-randomized when you start.'
+              : `${ids.length - order.length > 0 ? `${ids.length - order.length} team${ids.length - order.length > 1 ? 's have' : ' has'} joined` : 'Teams have changed'} since the order was set — it will be auto-corrected when you start.`}
+          </p>
+        ) : null
+      })()}
       {!isMock && league.status === 'setup' && (
-        <p className="msg">You can randomize & reveal the order any time — but re-randomize if anyone joins after, and lock the league before starting the draft.</p>
+        <p className="msg">Lock the league before starting the draft.</p>
       )}
 
       {orderNames && (
