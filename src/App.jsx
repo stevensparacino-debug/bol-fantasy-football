@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.6' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.8' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -699,6 +699,18 @@ select.input { appearance: none; }
   font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
   color: var(--orange); border: 1px solid var(--orange);
   padding: 4px 10px; border-radius: 999px;
+}
+
+/* ---------- v9.8: draft float nav ---------- */
+.draft-float-nav {
+  display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 25;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  padding: 8px 14px; align-items: center; gap: 10px;
+}
+@media (max-width: 860px) {
+  .draft-float-nav { display: flex; }
+  .draft-header { display: none; }
+  .draft-topbar { top: 44px; }
 }
 
 /* ---------- v8.6: mobile draft UX ---------- */
@@ -1583,9 +1595,15 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         </div>
       )}
 
-      {(active || preDraft) && (
+      {(active || preDraft || drafting) && (
         <nav className="bottom-nav">
-          {[
+          {drafting ? (
+            <>
+              <button className="bn-item on">🏈 Draft</button>
+              <button className="bn-item" onClick={() => setTab('home')}>League</button>
+              <button className="bn-item" onClick={() => setTab('feed')}>Feed</button>
+            </>
+          ) : [
             ['home', 'League'], ['team', 'Team'], ['scores', 'Matchup'],
             ['players', 'Players'], ['feed', 'Feed'],
           ].map(([key, label]) => (
@@ -1858,7 +1876,9 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
         .update({ draft_order: finalOrder }).eq('id', league.id)
     }
     const deadline = new Date(Date.now() + DRAFT_PICK_TIMER * 1000).toISOString()
+    // Single atomic update so realtime never delivers 'drafting' with the old order
     await supabase.from('leagues').update({
+      draft_order: finalOrder,
       status: 'drafting', current_pick: 0, paused: false, pick_deadline: deadline,
     }).eq('id', league.id)
     setBusy(false)
@@ -2375,6 +2395,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   }, [queue, league.id])
   const [connected, setConnected] = useState(1)
   const [draftTab, setDraftTab] = useState('players') // mobile: 'players' | 'my'
+  const [pickErr, setPickErr] = useState(null)
   const [fastBots, setFastBotsState] = useState(() => {
     try { return localStorage.getItem('bolff_fast_bots') === '1' } catch { return false }
   }) // mock-only: bots pick every 200ms; remembered across refreshes
@@ -2474,7 +2495,13 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
       league_id: league.id, team_id: teamId, player_id: playerId,
       round, pick_number: pickNo + 1, // 1-indexed for humans
     })
-    if (error) return false // unique constraint = someone beat us to it; realtime will catch us up
+    if (error) {
+      // Unique constraint = someone beat us; realtime will advance the pick — return false silently.
+      // Any other error: return the message so the caller can show it.
+      if (error.code === '23505') return false
+      console.error('makePick error:', error)
+      return error.message || 'Pick failed'
+    }
     const nextPick = pickNo + 1
     const done = nextPick >= totalPicks
     await supabase.from('leagues').update({
@@ -2487,11 +2514,22 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
 
   const manualPick = async (playerId) => {
     if (busyPick || draftDone) return
-    const allowed = onClockIsMe || (isLeagueAdmin && (isMock || true)) // admin can pick on behalf
+    const allowed = onClockIsMe || isLeagueAdmin
     if (!allowed) return
     setBusyPick(true)
-    await makePick(onClockTeamId, playerId, currentPick)
-    setBusyPick(false)
+    try {
+      const result = await makePick(onClockTeamId, playerId, currentPick)
+      if (result === false) {
+        // Unique constraint — already picked, realtime will catch up
+      } else if (typeof result === 'string') {
+        setPickErr(result)
+        setTimeout(() => setPickErr(null), 4000)
+      }
+    } catch (err) {
+      console.error('manualPick error:', err)
+    } finally {
+      setBusyPick(false)
+    }
   }
 
   const doAutoPick = useCallback(async () => {
@@ -2594,8 +2632,19 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   return (
     <>
       <div className="draft-header">
-        <span className="display" style={{ fontSize: 16 }}>{league.name} · {league.season || CURRENT_SEASON} DRAFT</span>
-        <span className="live-pill">{draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="display" style={{ fontSize: 16 }}>{league.name} · {league.season || CURRENT_SEASON} DRAFT</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="live-pill">{draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED</span>
+        </div>
+      </div>
+      <div className="draft-float-nav">
+        <span className="dt-label" style={{ alignSelf: 'center' }}>{league.name}</span>
+        <span className="live-pill" style={{ fontSize: 9 }}>{draftDone ? 'DONE' : 'LIVE'} · {connected}/{numTeams}</span>
+        {isMock && (
+          <button className="btn btn-xs btn-ghost" onClick={() => window.history.back()}>← Exit mock</button>
+        )}
       </div>
       {isMock && (
         <div className="mock-banner" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -2705,14 +2754,25 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
                 </button>
                 <button className="btn btn-xs btn-primary" disabled={!canDraftNow || busyPick}
                   onClick={() => manualPick(p.id)}>
-                  Draft
+                  {busyPick ? '…' : 'Draft'}
                 </button>
               </div>
             ))}
             {pool.length === 0 && <div className="pool-row">No players match.</div>}
           </div>
-          {isLeagueAdmin && !draftDone && !onClockIsMe && (
-            <p className="msg">Commish: drafting now picks on behalf of <b>{onClockTeam?.team_name}</b>.</p>
+          {pickErr && (
+            <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: 'var(--red-soft)', marginBottom: 8 }}>
+              ⚠️ {pickErr}
+            </div>
+          )}
+          {!draftDone && (
+            <p className="msg" style={{ marginTop: 8, fontSize: 12 }}>
+              {draftDone ? '' :
+                onClockIsMe ? `Your turn — pick for ${onClockTeam?.team_name}.` :
+                isLeagueAdmin ? `Commish: tapping Draft picks on behalf of ${onClockTeam?.team_name}.` :
+                `Waiting for ${onClockTeam?.team_name} to pick…`}
+              {league.paused ? ' · DRAFT PAUSED' : ''}
+            </p>
           )}
         </div>
 
@@ -2738,7 +2798,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
               <button className="btn btn-primary" style={{ width: '100%', marginTop: 10 }}
                 disabled={!canDraftNow || busyPick}
                 onClick={() => manualPick(displayQueue[0])}>
-                DRAFT {playersById[displayQueue[0]]?.name?.toUpperCase()}
+                {busyPick ? 'PICKING…' : `DRAFT ${playersById[displayQueue[0]]?.name?.toUpperCase()}`}
               </button>
             )}
           </div>
