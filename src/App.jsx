@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.8' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.9' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 12
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -2504,11 +2504,17 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     }
     const nextPick = pickNo + 1
     const done = nextPick >= totalPicks
-    await supabase.from('leagues').update({
+    const { error: lgErr } = await supabase.from('leagues').update({
       current_pick: nextPick,
       pick_deadline: done ? null : new Date(Date.now() + DRAFT_PICK_TIMER * 1000).toISOString(),
       ...(done ? { status: 'active' } : {}),
     }).eq('id', league.id)
+    if (lgErr) {
+      // RLS blocks non-admin from updating leagues — the admin's pick-driver
+      // will advance the clock via the realtime loop within 3 seconds.
+      // This is expected for non-admin pickers; not a real error.
+      console.warn('League clock advance skipped (non-admin) — admin driver will catch up:', lgErr.message)
+    }
     return true
   }, [league.id, numTeams, totalPicks])
 
@@ -2563,6 +2569,23 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     doAutoPick()
   }, [now, deadlineMs, draftDone, league.paused, onClockTeamId, players.length, busyPick,
       isLeagueAdmin, onClockIsMe, onClockIsBot, isMock, currentPick, doAutoPick, fastBots])
+
+  // Admin-only: advance the clock if a non-admin pick landed (pick in DB but
+  // current_pick not updated due to RLS). Fires whenever picks list changes.
+  useEffect(() => {
+    if (!isLeagueAdmin || draftDone || league.paused) return
+    const expected = picks.length
+    if (expected > currentPick) {
+      // Picks ahead of current_pick — advance
+      const nextPick = expected
+      const done = nextPick >= totalPicks
+      supabase.from('leagues').update({
+        current_pick: nextPick,
+        pick_deadline: done ? null : new Date(Date.now() + DRAFT_PICK_TIMER * 1000).toISOString(),
+        ...(done ? { status: 'active' } : {}),
+      }).eq('id', league.id)
+    }
+  }, [picks.length, currentPick, isLeagueAdmin, draftDone, league.paused, league.id, totalPicks])
 
   // ---- pause / resume (admin) ----
   const togglePause = async () => {
