@@ -2718,7 +2718,7 @@ ${rosterStr}
 // ============================================================
 // DRAFT ROOM
 // ============================================================
-function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) {
+function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock, previewMode }) {
   const [players, setPlayers] = useState([])
   const [picks, setPicks] = useState([])
   const [search, setSearch] = useState('')
