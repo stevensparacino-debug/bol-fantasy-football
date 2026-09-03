@@ -763,6 +763,95 @@ select.input { appearance: none; }
 }
 .draft-peek-banner:hover { filter: brightness(1.08); }
 
+/* ---------- v9.16: draft room full-screen layout ---------- */
+.draft-fixed {
+  position: fixed;
+  top: 53px; /* header height */
+  left: 0; right: 0; bottom: 0;
+  background: var(--bg);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.draft-fixed-top {
+  flex-shrink: 0;
+  background: var(--bg);
+  padding: 12px 20px 0;
+}
+.draft-body-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 20px;
+}
+.draft-mtabs {
+  flex-shrink: 0;
+}
+.draft-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Each column scrolls internally */
+.draft-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.pool-controls {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+.pool {
+  flex: 1;
+  overflow-y: auto;
+  max-height: none !important; /* override the old 520px cap */
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+/* Sidebar scrolls as one unit */
+.draft-layout > div:last-child {
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 12px;
+}
+.draft-board-tray {
+  flex-shrink: 0;
+  padding: 8px 20px 12px;
+  border-top: 1px solid var(--line);
+}
+.draft-board-tray summary {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--muted); cursor: pointer; list-style: none;
+  padding: 6px 0;
+}
+.draft-board-tray summary:hover { color: var(--text); }
+.draft-board-tray[open] { overflow-x: auto; }
+
+/* Mobile overrides */
+@media (max-width: 860px) {
+  .draft-fixed { top: 53px; bottom: 58px; } /* leave room for bottom nav */
+  .draft-fixed-top { padding: 8px 12px 0; }
+  .draft-body-wrap { padding: 0 12px; }
+  .draft-layout { grid-template-columns: 1fr; }
+  .draft-col { display: none; }
+  .draft-col.mshow {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .draft-board-tray { padding: 8px 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
 
@@ -2855,13 +2944,14 @@ ${pool}
   }
 
   return (
-    <>
-      <div className="draft-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="display" style={{ fontSize: 16 }}>{league.name} · {league.season || CURRENT_SEASON} DRAFT</span>
-          <span className="live-pill">{draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED</span>
+    <div className="draft-fixed">
+      <div className="draft-fixed-top">
+        <div className="draft-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="display" style={{ fontSize: 16 }}>{league.name} · {league.season || CURRENT_SEASON} DRAFT</span>
+            <span className="live-pill">{draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED</span>
+          </div>
         </div>
-      </div>
       <div className="draft-float-nav">
         <span className="dt-label" style={{ alignSelf: 'center' }}>{league.name}</span>
         <span className="live-pill" style={{ fontSize: 9 }}>{draftDone ? 'DONE' : 'LIVE'} · {connected}/{numTeams}</span>
@@ -2940,6 +3030,9 @@ ${pool}
         )}
       </div>
 
+      </div>{/* end draft-fixed-top */}
+
+      <div className="draft-body-wrap">
       <div className="draft-mtabs">
         <button className={`tab ${draftTab === 'players' ? 'on' : ''}`} onClick={() => setDraftTab('players')}>
           Players
@@ -3087,11 +3180,18 @@ ${pool}
         </div>
       </div>
 
-      <DraftBoardGrid
-        league={league} teams={teams} picks={picks} playersById={playersById}
-        numTeams={numTeams} currentPick={currentPick} secondsLeft={secondsLeft} draftDone={draftDone}
-      />
-    </>
+      </div>{/* end draft-body-wrap */}
+
+      <div className="draft-board-tray">
+        <details>
+          <summary>📋 Full draft board</summary>
+          <DraftBoardGrid
+            league={league} teams={teams} picks={picks} playersById={playersById}
+            numTeams={numTeams} currentPick={currentPick} secondsLeft={secondsLeft} draftDone={draftDone}
+          />
+        </details>
+      </div>
+    </div>
   )
 }
 
