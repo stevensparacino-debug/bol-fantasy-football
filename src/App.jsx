@@ -45,6 +45,18 @@ const isCoAdmin = (league, userId) =>
 const slotAccepts = (position, slot) =>
   slot.startsWith('BN') ? true : (SLOT_ELIG[slot] || []).includes(position)
 
+// The AI team's own voice — deliberately NOT Coach Sunday. Scrappy underdog
+// machine with a chip on its shoulder and good-natured trash talk.
+const AI_GM_PERSONA = [
+  'VOICE INSTRUCTION — for this response, drop your usual broadcaster persona completely.',
+  'You are NOT Coach Sunday here. You are the AI general manager of a fantasy team competing against a room of humans in an office league.',
+  'Character: the scrappy underdog machine. Nobody respects the robot team, and you enjoy that.',
+  'You are dry, quietly confident about your math, and you talk friendly trash at the humans.',
+  'Keep it SHORT — one or two sentences, never a speech.',
+  'Never use broadcast catchphrases, never say "folks", never sound like a commentator.',
+  'Trash talk stays good-natured. Office league, not a war.',
+].join(' ')
+
 const BOT_NAMES = [
   'Gridiron Bots', 'Blitz Machine', 'End Zone AI', 'Pixel Pushers',
   'The Algorithms', 'Fourth & Bot', 'Circuit Breakers', 'Auto Draft FC',
@@ -822,8 +834,9 @@ select.input { appearance: none; }
 .dr-clock.warn { color: var(--red); }
 .dr-clock.ai { color: var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
 .dr-clock-sub { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.08em; }
-.dr-progress { height: 3px; border-radius: 2px; background: var(--raise); overflow: hidden; }
+.dr-progress { height: 5px; border-radius: 0; background: var(--raise); overflow: hidden; }
 .dr-progress > div { height: 100%; background: var(--cyan); transition: width 0.4s linear; }
+.dr-progress > div.warn { background: var(--red); }
 .dr-upnext { display: flex; flex-direction: column; gap: 2px; text-align: right; }
 .dr-upnext-row { font-size: 11px; color: var(--muted); }
 .dr-upnext-row.you { color: var(--orange); font-weight: 700; }
@@ -2601,6 +2614,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
                   return `${r.slot}: ${p?.name || r.player_id} (${p?.position} ${p?.nfl_team || 'FA'}) PROJ:${projPts[r.player_id] ?? '?'}`
                 }).join('\n')
                 const context =
+                  AI_GM_PERSONA + '\n\n' +
                   `You are the AI GM for "${aiTeam.team_name}" in a 10-team half-PPR league, week ${week}.
 
 ` +
@@ -2615,7 +2629,7 @@ ${rosterStr}
 ` +
                   `Respond ONLY with JSON, no markdown:
 ` +
-                  `{"QB":"player_id","RB1":"player_id","RB2":"player_id","WR1":"player_id","WR2":"player_id","TE":"player_id","FLEX":"player_id","K":"player_id","DEF":"player_id"}`
+                  `{"QB":"player_id","RB1":"player_id","RB2":"player_id","WR1":"player_id","WR2":"player_id","TE":"player_id","FLEX":"player_id","K":"player_id","DEF":"player_id","smack":"one short line of good-natured trash talk in your underdog voice"}`
                 const { data, error } = await supabase.functions.invoke('draft-guru', {
                   body: { context, question: 'Set the optimal lineup for this week.' }
                 })
@@ -2640,7 +2654,9 @@ ${rosterStr}
                 await supabase.from('feed_posts').insert({
                   league_id: league.id, user_id: aiTeam.user_id,
                   user_name: aiTeam.team_name, team_name: 'AI LINEUP',
-                  body: `Week ${week} lineup set by Claude AI. Starting: ${Object.entries(lineup).map(([s,pid]) => `${s}: ${pById[pid]?.name || pid}`).join(', ')}.`,
+                  body: (lineup.smack ? lineup.smack + '\n\n' : '') + `Week ${week} lineup: ` +
+                    Object.entries(lineup).filter(([s]) => ROSTER_SLOTS.includes(s))
+                      .map(([s, pid]) => `${s} ${pById[pid]?.name || pid}`).join(' · '),
                 })
                 window.alert('AI lineup set and posted to the feed.')
               } catch (err) {
@@ -2910,6 +2926,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock, pr
       ).join('\n')
       const round = Math.floor(currentPick / (league.draft_order?.length || 10)) + 1
       const context =
+        AI_GM_PERSONA + '\n\n' +
         `You are the AI general manager for "${aiTeam.team_name}" in a 10-team half-PPR fantasy football league.
 ` +
         `It is round ${round}, overall pick ${currentPick + 1}.
@@ -2928,7 +2945,7 @@ ${pool}
 ` +
         `Respond with ONLY this JSON on one line, no markdown, no explanation:
 ` +
-        `{"player_id":"THE_SLEEPER_PLAYER_ID","reason":"one sentence"}`
+        `{"player_id":"THE_SLEEPER_PLAYER_ID","reason":"one short line IN YOUR UNDERDOG VOICE — light trash talk welcome"}`
       const { data, error } = await supabase.functions.invoke('draft-guru', {
         body: { context, question: 'Make your draft pick now.' }
       })
@@ -3162,13 +3179,18 @@ ${pool}
               <div className={`dr-clock ${secondsLeft != null && secondsLeft <= 10 && !onClockIsAI ? 'warn' : ''} ${onClockIsAI ? 'ai' : ''}`}>
                 {onClockIsAI ? (aiThinking ? '🤖' : '🧠')
                   : league.paused ? '⏸'
-                  : secondsLeft != null ? `0:${String(secondsLeft).padStart(2, '0')}` : '--'}
+                  : secondsLeft != null
+                    ? `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}`
+                    : '--'}
               </div>
               <span className="dr-clock-sub">
                 {onClockIsAI ? (aiThinking ? 'Claude is thinking…' : 'Claude picks in a moment')
                   : `left of 1:${String(DRAFT_PICK_TIMER % 60).padStart(2, '0')} · auto-pick if time expires`}
               </span>
-              <div className="dr-progress"><div style={{ width: `${pct}%` }} /></div>
+              <div className="dr-progress">
+                <div className={secondsLeft != null && secondsLeft <= 10 ? 'warn' : ''}
+                  style={{ width: `${pct}%` }} />
+              </div>
             </div>
           )}
           <div className="dr-upnext">
