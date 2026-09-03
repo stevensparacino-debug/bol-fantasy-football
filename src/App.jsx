@@ -763,93 +763,219 @@ select.input { appearance: none; }
 }
 .draft-peek-banner:hover { filter: brightness(1.08); }
 
-/* ---------- v9.16: draft room full-screen layout ---------- */
-.draft-fixed {
-  position: fixed;
-  top: 53px; /* header height */
-  left: 0; right: 0; bottom: 0;
-  background: var(--bg);
-  z-index: 15;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.draft-fixed-top {
-  flex-shrink: 0;
-  background: var(--bg);
-  padding: 12px 20px 0;
-}
-.draft-body-wrap {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  padding: 0 20px;
-}
-.draft-mtabs {
-  flex-shrink: 0;
-}
-.draft-layout {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 16px;
-  min-height: 0;
-  overflow: hidden;
-}
-/* Each column scrolls internally */
-.draft-col {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-.pool-controls {
-  flex-shrink: 0;
-  margin-bottom: 8px;
-}
-.pool {
-  flex: 1;
-  overflow-y: auto;
-  max-height: none !important; /* override the old 520px cap */
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-}
-/* Sidebar scrolls as one unit */
-.draft-layout > div:last-child {
-  overflow-y: auto;
-  min-height: 0;
-  padding-bottom: 12px;
-}
-.draft-board-tray {
-  flex-shrink: 0;
-  padding: 8px 20px 12px;
-  border-top: 1px solid var(--line);
-}
-.draft-board-tray summary {
-  font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
-  color: var(--muted); cursor: pointer; list-style: none;
-  padding: 6px 0;
-}
-.draft-board-tray summary:hover { color: var(--text); }
-.draft-board-tray[open] { overflow-x: auto; }
+/* ================= v9.18: DRAFT ROOM ================= */
+.draft-float-nav, .draft-header { display: none !important; }
 
-/* Mobile overrides */
+/* --- topline --- */
+.dr-topline {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; flex-wrap: wrap; padding: 0 0 12px;
+}
+.dr-topline-l { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.dr-league {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; font-size: 15px;
+}
+.dr-round { font-size: 12px; color: var(--muted); }
+.dr-topline-r { display: flex; align-items: center; gap: 10px; }
+
+/* --- command bar --- */
+.dr-clockbar {
+  display: grid; grid-template-columns: auto minmax(180px, 1fr) minmax(200px, 1.1fr) auto;
+  gap: 20px; align-items: center;
+  background: linear-gradient(90deg, rgba(248,94,50,0.16), var(--surface) 55%);
+  border: 1px solid var(--line); border-left: 4px solid var(--orange);
+  border-radius: 10px; padding: 14px 20px;
+  position: sticky; top: 53px; z-index: 18;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.30);
+}
+.dr-clockbar.mine { border-left-color: var(--lime); }
+.dr-clockbar.preview { grid-template-columns: 1fr; background: var(--surface); border-left-color: var(--lime); }
+.dr-pick-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--orange); color: var(--on-accent);
+  border-radius: 8px; padding: 8px 14px; min-width: 74px;
+}
+.dr-pick-tile span {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.85;
+}
+.dr-pick-tile b {
+  font-family: 'Archivo Narrow', sans-serif; font-size: 28px; line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.dr-onclock { min-width: 0; }
+.dr-onclock-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--orange);
+}
+.dr-onclock-team {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  font-size: 26px; line-height: 1.1; margin: 2px 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dr-onclock-sub { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.dr-clockwrap { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dr-clock {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  font-size: 40px; line-height: 1; color: var(--cyan); font-variant-numeric: tabular-nums;
+}
+.dr-clock.warn { color: var(--red); }
+.dr-clock.ai { color: var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
+.dr-clock-sub { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.08em; }
+.dr-progress { height: 3px; border-radius: 2px; background: var(--raise); overflow: hidden; }
+.dr-progress > div { height: 100%; background: var(--cyan); transition: width 0.4s linear; }
+.dr-upnext { display: flex; flex-direction: column; gap: 2px; text-align: right; }
+.dr-upnext-row { font-size: 11px; color: var(--muted); }
+.dr-upnext-row.you { color: var(--orange); font-weight: 700; }
+
+/* --- main grid --- */
+.dr-main {
+  display: grid; grid-template-columns: 1fr 340px; gap: 16px;
+  align-items: start; margin-top: 16px;
+}
+.dr-poolcol { display: flex; flex-direction: column; min-width: 0; }
+.dr-panel-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; padding: 2px 0 10px;
+}
+.dr-panel-head h3 {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em; font-size: 14px;
+}
+.dr-panel-head span { font-size: 11px; color: var(--faint); }
+
+/* --- filters --- */
+.dr-filters { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.dr-search { flex: 1; min-width: 200px; }
+.dr-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.dr-chips .chip { border-radius: 6px; padding: 9px 14px; }
+
+/* --- player list --- */
+.dr-list {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  max-height: calc(100vh - 340px); min-height: 300px; overflow-y: auto;
+}
+.dr-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.dr-row:last-child { border-bottom: none; }
+.dr-row:hover { background: var(--card); }
+.dr-rank {
+  font-size: 11px; color: var(--faint); min-width: 18px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dr-pos {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 10px;
+  letter-spacing: 0.08em; padding: 4px 7px; border-radius: 4px; min-width: 38px; text-align: center;
+  border: 1px solid var(--line-strong); color: var(--muted);
+}
+.dr-pos.p-QB { color: var(--orange); border-color: var(--orange); }
+.dr-pos.p-RB { color: var(--cyan); border-color: var(--cyan); }
+.dr-pos.p-WR { color: var(--lime); border-color: var(--lime); }
+.dr-pos.p-TE { color: var(--magenta); border-color: var(--magenta); }
+.dr-pos.p-K { color: var(--yellow); border-color: var(--yellow); }
+.dr-pos.p-DEF { color: var(--faint); border-color: var(--faint); }
+.dr-nameblock { flex: 1; min-width: 0; }
+.dr-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dr-hint {
+  font-size: 10px; color: var(--faint); text-transform: uppercase;
+  letter-spacing: 0.06em; margin-top: 2px;
+}
+.dr-hint.fills { color: var(--cyan); font-weight: 700; }
+.dr-stat { display: flex; flex-direction: column; align-items: flex-end; min-width: 56px; }
+.dr-stat b {
+  font-family: 'Archivo Narrow', sans-serif; font-size: 17px; line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.dr-stat span { font-size: 8px; color: var(--faint); letter-spacing: 0.12em; }
+.dr-stat-sm b { font-size: 14px; color: var(--muted); }
+.dr-qbtn { min-width: 76px; }
+.dr-qbtn.on { border-color: var(--lime); color: var(--lime); }
+.dr-dbtn { min-width: 66px; }
+.dr-status { font-size: 12px; color: var(--muted); margin-top: 10px; font-weight: 600; }
+
+/* --- sidebar --- */
+.dr-side {
+  display: flex; flex-direction: column; gap: 12px;
+  position: sticky; top: 160px;
+  max-height: calc(100vh - 180px); overflow-y: auto; padding-right: 2px;
+}
+.dr-panel {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px 16px;
+}
+.dr-slot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.dr-slot:last-child { border-bottom: none; }
+.dr-slot-tag {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 10px;
+  letter-spacing: 0.08em; min-width: 38px; color: var(--faint);
+}
+.dr-slot-tag.p-QB { color: var(--orange); }
+.dr-slot-tag.p-RB { color: var(--cyan); }
+.dr-slot-tag.p-WR { color: var(--lime); }
+.dr-slot-tag.p-TE { color: var(--magenta); }
+.dr-slot-tag.p-K { color: var(--yellow); }
+.dr-slot-name { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dr-slot-name.open { color: var(--faint); font-weight: 400; font-style: italic; }
+.dr-slot-team { font-size: 10px; color: var(--faint); }
+.dr-qrow {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px;
+}
+.dr-qrow:last-child { border-bottom: none; }
+.dr-qnum { color: var(--faint); min-width: 14px; }
+.dr-qname { flex: 1; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dr-qmeta { font-size: 10px; color: var(--faint); }
+.dr-cta {
+  position: sticky; bottom: 0; z-index: 5;
+  background: var(--card); border: 1px solid var(--line-strong);
+  border-radius: 10px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+  box-shadow: 0 -6px 16px rgba(0,0,0,0.28);
+}
+.dr-cta-btn { width: 100%; font-size: 14px; padding: 14px 12px; }
+
+/* --- board tray --- */
+.draft-board-tray { margin-top: 18px; }
+.draft-board-tray summary {
+  cursor: pointer; list-style: none; display: inline-block;
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em; font-size: 13px;
+  color: var(--muted); padding: 10px 16px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+}
+.draft-board-tray summary::-webkit-details-marker { display: none; }
+.draft-board-tray summary:hover { color: var(--orange); border-color: var(--orange); }
+
+/* --- mobile --- */
 @media (max-width: 860px) {
-  .draft-fixed { top: 53px; bottom: 58px; } /* leave room for bottom nav */
-  .draft-fixed-top { padding: 8px 12px 0; }
-  .draft-body-wrap { padding: 0 12px; }
-  .draft-layout { grid-template-columns: 1fr; }
-  .draft-col { display: none; }
-  .draft-col.mshow {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
+  .dr-clockbar {
+    grid-template-columns: auto 1fr; gap: 12px; padding: 12px 14px; top: 53px;
   }
-  .draft-board-tray { padding: 8px 12px; }
+  .dr-upnext { grid-column: 1 / -1; text-align: left; flex-direction: row; gap: 12px; flex-wrap: wrap; }
+  .dr-clockwrap { grid-column: 1 / -1; }
+  .dr-clock { font-size: 32px; }
+  .dr-onclock-team { font-size: 20px; }
+  .dr-pick-tile { min-width: 60px; padding: 6px 10px; }
+  .dr-pick-tile b { font-size: 22px; }
+  .dr-main { grid-template-columns: 1fr; margin-top: 12px; }
+  .draft-col { display: none; }
+  .draft-col.mshow { display: flex; flex-direction: column; }
+  .dr-side { position: static; max-height: none; overflow: visible; }
+  .dr-list { max-height: calc(100vh - 420px); min-height: 240px; }
+  .dr-stat-sm { display: none; }
+  .dr-qbtn { min-width: 62px; font-size: 10px; padding: 7px 8px; }
+  .dr-cta { position: sticky; bottom: 62px; }
+}
+@media (max-width: 560px) {
+  .dr-row { gap: 8px; padding: 10px; }
+  .dr-hint { font-size: 9px; }
+  .dr-stat { min-width: 44px; }
+  .dr-qbtn { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
@@ -2943,25 +3069,29 @@ ${pool}
     })
   }
 
+  // Map my picks into starter slots so the roster panel shows real fill state
+  const mySlotMap = useMemo(() => {
+    const sorted = [...myPicks].sort((a, b) => (a.adp ?? 1e9) - (b.adp ?? 1e9))
+    const assigned = autoAssignSlots(sorted)
+    const byId = Object.fromEntries(myPicks.map(p => [p.id, p]))
+    const map = {}
+    assigned.forEach(({ player_id, slot }) => { map[slot] = byId[player_id] })
+    return map
+  }, [myPicks])
+
+  const myOpenSlots = ROSTER_SLOTS.filter(s => !mySlotMap[s])
+  const fillsHint = (p) => {
+    const slot = myOpenSlots.find(s => slotAccepts(p.position, s))
+    return slot ? `Fills your ${slot} hole` : null
+  }
+  const posLabel = (pos) => (pos === 'DEF' ? 'DST' : pos)
+  const pct = secondsLeft != null ? Math.max(0, Math.min(100, (secondsLeft / DRAFT_PICK_TIMER) * 100)) : 0
+
   return (
-    <div className="draft-fixed">
-      <div className="draft-fixed-top">
-        <div className="draft-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="display" style={{ fontSize: 16 }}>{league.name} · {league.season || CURRENT_SEASON} DRAFT</span>
-            <span className="live-pill">{draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED</span>
-          </div>
-        </div>
-      <div className="draft-float-nav">
-        <span className="dt-label" style={{ alignSelf: 'center' }}>{league.name}</span>
-        <span className="live-pill" style={{ fontSize: 9 }}>{draftDone ? 'DONE' : 'LIVE'} · {connected}/{numTeams}</span>
-        {isMock && (
-          <button className="btn btn-xs btn-ghost" onClick={() => window.history.back()}>← Exit mock</button>
-        )}
-      </div>
+    <div className="dr">
       {isMock && (
         <div className="mock-banner" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <span>MOCK DRAFT — bots autopick their turns. You're {teamsById[myTeamId]?.team_name}.</span>
+          <span>MOCK DRAFT — you're {teamsById[myTeamId]?.team_name}.</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 700 }}>
             <input type="checkbox" checked={fastBots} onChange={e => setFastBots(e.target.checked)} />
             Fast-forward bots
@@ -2979,161 +3109,246 @@ ${pool}
         </div>
       )}
 
-      <div className="draft-topbar">
-        <div className="dt-cell">
-          <span className="dt-label">Pick</span>
-          <span className="dt-big">{draftDone ? '—' : `${round}.${String(pickInRound).padStart(2, '0')}`}</span>
+      {/* ---------- topline ---------- */}
+      <div className="dr-topline">
+        <div className="dr-topline-l">
+          <span className="dr-league">{league.name}</span>
+          <span className="dr-round">
+            {league.season || CURRENT_SEASON} draft · {draftDone ? 'complete' : `round ${round} of ${TOTAL_ROUNDS}`}
+          </span>
         </div>
-        <div className="dt-cell dt-grow">
-          <span className="dt-label">On the clock</span>
-          {draftDone ? (
-            <span className="dt-team">Draft complete</span>
-          ) : (
-            <>
-              <span className="dt-team">{onClockTeam?.team_name || '—'}{onClockIsMe && ' · YOU'}</span>
-              <span className="dt-sub">
-                {onClockTeam?.user_name} · {onClockNeeds}{league.paused ? ' · PAUSED' : ''}
-              </span>
-            </>
+        <div className="dr-topline-r">
+          <span className="live-pill">
+            {previewMode ? 'PRE-DRAFT' : draftDone ? 'COMPLETE' : 'LIVE'} · {connected} OF {numTeams} CONNECTED
+          </span>
+          {isLeagueAdmin && !draftDone && !previewMode && (
+            <button className="btn btn-sm" onClick={togglePause}>
+              {league.paused ? 'Resume' : 'Pause'}
+            </button>
           )}
         </div>
-        <div className="dt-cell">
-          <span className="dt-label">Time remaining</span>
-          {!draftDone && (
-            <div className={`clock ${league.paused ? 'paused' : ''} ${secondsLeft != null && secondsLeft <= 10 && !onClockIsAI ? 'warn' : ''} ${onClockIsAI ? 'ai-clock' : ''}`}>
-              {onClockIsAI ? (aiThinking ? '🤖' : '🧠') : league.paused ? '⏸' : secondsLeft != null ? `:${String(secondsLeft).padStart(2, '0')}` : '--'}
-            </div>
-          )}
-          {!draftDone && !onClockIsAI && <span className="dt-sub">of 1:{String(DRAFT_PICK_TIMER % 60).padStart(2, '0')}</span>}
-          {onClockIsAI && <span className="dt-sub">{aiThinking ? 'Claude is thinking…' : 'AI on the clock'}</span>}
-        </div>
-        <div className="dt-cell dt-upnext">
-          <span className="dt-label">Up next</span>
-          {!draftDone && Array.from({ length: 3 }).map((_, i) => {
-            const n = currentPick + 1 + i
-            if (n >= totalPicks) return null
-            const tid = league.draft_order[slotForPick(n, numTeams)]
-            const r = Math.floor(n / numTeams) + 1
-            const pr = (n % numTeams) + 1
-            return (
-              <span key={n} className="dt-sub">
-                {r}.{String(pr).padStart(2, '0')} {teamsById[tid]?.team_name}{tid === myTeamId ? ' · your turn' : ''}
-              </span>
-            )
-          })}
-          {draftDone && <span className="dt-sub">Rosters finalizing…</span>}
-        </div>
-        {isLeagueAdmin && !draftDone && (
-          <button className="btn btn-sm" onClick={togglePause}>
-            {league.paused ? 'Resume draft' : 'Pause draft'}
-          </button>
-        )}
       </div>
 
-      </div>{/* end draft-fixed-top */}
+      {/* ---------- command bar ---------- */}
+      {previewMode ? (
+        <div className="dr-clockbar preview">
+          <div className="dr-onclock">
+            <span className="dr-onclock-label">Draft opens soon</span>
+            <h2 className="dr-onclock-team">Build your queue</h2>
+            <span className="dr-onclock-sub">
+              Browse the pool and tap QUEUE to line up targets. Picks unlock when the commissioner starts the draft.
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className={`dr-clockbar ${onClockIsMe ? 'mine' : ''}`}>
+          <div className="dr-pick-tile">
+            <span>Pick</span>
+            <b>{draftDone ? '—' : `${round}.${String(pickInRound).padStart(2, '0')}`}</b>
+          </div>
+          <div className="dr-onclock">
+            <span className="dr-onclock-label">
+              {draftDone ? 'Draft complete' : onClockIsMe ? "You're on the clock" : onClockIsAI ? 'AI on the clock' : 'On the clock'}
+            </span>
+            <h2 className="dr-onclock-team">{draftDone ? 'Rosters finalizing…' : (onClockTeam?.team_name || '—')}</h2>
+            {!draftDone && (
+              <span className="dr-onclock-sub">
+                {onClockTeam?.user_name} · {onClockNeeds}{league.paused ? ' · PAUSED' : ''}
+              </span>
+            )}
+          </div>
+          {!draftDone && (
+            <div className="dr-clockwrap">
+              <div className={`dr-clock ${secondsLeft != null && secondsLeft <= 10 && !onClockIsAI ? 'warn' : ''} ${onClockIsAI ? 'ai' : ''}`}>
+                {onClockIsAI ? (aiThinking ? '🤖' : '🧠')
+                  : league.paused ? '⏸'
+                  : secondsLeft != null ? `0:${String(secondsLeft).padStart(2, '0')}` : '--'}
+              </div>
+              <span className="dr-clock-sub">
+                {onClockIsAI ? (aiThinking ? 'Claude is thinking…' : 'Claude picks in a moment')
+                  : `left of 1:${String(DRAFT_PICK_TIMER % 60).padStart(2, '0')} · auto-pick if time expires`}
+              </span>
+              <div className="dr-progress"><div style={{ width: `${pct}%` }} /></div>
+            </div>
+          )}
+          <div className="dr-upnext">
+            <span className="dt-label">Up next</span>
+            {!draftDone && Array.from({ length: 2 }).map((_, i) => {
+              const n = currentPick + 1 + i
+              if (n >= totalPicks) return null
+              const tid = league.draft_order?.[slotForPick(n, numTeams)]
+              const r = Math.floor(n / numTeams) + 1
+              const pr = (n % numTeams) + 1
+              return (
+                <span key={n} className={`dr-upnext-row ${tid === myTeamId ? 'you' : ''}`}>
+                  {r}.{String(pr).padStart(2, '0')} {teamsById[tid]?.team_name}{tid === myTeamId ? ' · YOU' : ''}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
-      <div className="draft-body-wrap">
+      {pickErr && (
+        <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: 'var(--red-soft)', margin: '10px 0' }}>
+          ⚠️ {pickErr}
+        </div>
+      )}
+
+      {/* ---------- mobile tabs ---------- */}
       <div className="draft-mtabs">
         <button className={`tab ${draftTab === 'players' ? 'on' : ''}`} onClick={() => setDraftTab('players')}>
           Players
         </button>
         <button className={`tab ${draftTab === 'my' ? 'on' : ''}`} onClick={() => setDraftTab('my')}>
-          Queue & picks{displayQueue.length ? ` · ${displayQueue.length}` : ''}
+          My team{displayQueue.length ? ` · ${displayQueue.length}` : ''}
         </button>
       </div>
 
-      <div className="draft-layout">
-        <div className={`draft-col ${draftTab === 'players' ? 'mshow' : ''}`}>
-          <div className="pool-controls">
-            <input className="input" style={{ minWidth: 220 }} placeholder="Search players…"
+      {/* ---------- main ---------- */}
+      <div className="dr-main">
+        <div className={`dr-poolcol draft-col ${draftTab === 'players' ? 'mshow' : ''}`}>
+          <div className="dr-panel-head">
+            <h3>Make your pick</h3>
+            <span>{pool.length} shown · sorted by rank</span>
+          </div>
+          <div className="dr-filters">
+            <input className="input dr-search" placeholder="Search players, teams, positions"
               value={search} onChange={e => setSearch(e.target.value)} />
-            {['ALL', ...FANTASY_POSITIONS].map(pos => (
-              <button key={pos} className={`chip ${posFilter === pos ? 'on' : ''}`}
-                onClick={() => setPosFilter(pos)}>{pos}</button>
-            ))}
-          </div>
-          <div className="pool">
-            {pool.map(p => (
-              <div key={p.id} className={`pool-row pos-${p.position}`}>
-                <span className="pname">{p.name}</span>
-                <span className="pmeta">{p.position} · {p.nfl_team || 'FA'}</span>
-                <span className="prank" title="2025 avg points/game (half-PPR)">
-                  {p.last_season_avg != null ? `${p.last_season_avg} avg` : '—'}
-                </span>
-                <span className="prank" title="2025 total fantasy points (half-PPR)">
-                  {p.last_season_pts != null ? `${p.last_season_pts} pts` : '—'}
-                </span>
-                <span className="prank">#{p.adp ?? '—'}</span>
-                <button className={`btn btn-xs ${queue.includes(p.id) ? 'btn-turf' : 'btn-ghost'}`}
-                  title={queue.includes(p.id) ? 'Remove from queue' : 'Add to queue'}
-                  onClick={() => toggleQueue(p.id)}>
-                  {queue.includes(p.id) ? '✓' : '＋'}
-                </button>
-                <button className="btn btn-xs btn-primary" disabled={!canDraftNow || busyPick}
-                  onClick={() => manualPick(p.id)}>
-                  {busyPick ? '…' : 'Draft'}
-                </button>
-              </div>
-            ))}
-            {pool.length === 0 && <div className="pool-row">No players match.</div>}
-          </div>
-          {pickErr && (
-            <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: 'var(--red-soft)', marginBottom: 8 }}>
-              ⚠️ {pickErr}
+            <div className="dr-chips">
+              {['ALL', ...FANTASY_POSITIONS].map(pos => (
+                <button key={pos} className={`chip ${posFilter === pos ? 'on' : ''}`}
+                  onClick={() => setPosFilter(pos)}>{posLabel(pos)}</button>
+              ))}
             </div>
-          )}
-          {!draftDone && (
-            <p className="msg" style={{ marginTop: 8, fontSize: 12 }}>
-              {draftDone ? '' :
-                onClockIsMe ? `Your turn — pick for ${onClockTeam?.team_name}.` :
-                isLeagueAdmin ? `Commish: tapping Draft picks on behalf of ${onClockTeam?.team_name}.` :
-                `Waiting for ${onClockTeam?.team_name} to pick…`}
+          </div>
+          <div className="dr-list">
+            {pool.map((p, i) => {
+              const hint = fillsHint(p)
+              const queued = queue.includes(p.id)
+              return (
+                <div key={p.id} className="dr-row">
+                  <span className="dr-rank">{i + 1}</span>
+                  <span className={`dr-pos p-${p.position}`}>{posLabel(p.position)}</span>
+                  <div className="dr-nameblock">
+                    <div className="dr-name">{p.name}</div>
+                    <div className={`dr-hint ${hint ? 'fills' : ''}`}>
+                      {hint || `${p.nfl_team || 'FA'}${p.status && p.status !== 'active' ? ` · ${p.status}` : ''}`}
+                    </div>
+                  </div>
+                  <div className="dr-stat">
+                    <b>{p.last_season_pts != null ? p.last_season_pts : '—'}</b>
+                    <span>2025 PTS</span>
+                  </div>
+                  <div className="dr-stat dr-stat-sm">
+                    <b>{p.adp ?? '—'}</b>
+                    <span>RANK</span>
+                  </div>
+                  <button className={`btn btn-xs dr-qbtn ${queued ? 'on' : ''}`}
+                    onClick={() => toggleQueue(p.id)}>
+                    {queued ? '✓ QUEUED' : 'QUEUE'}
+                  </button>
+                  <button className="btn btn-xs btn-primary dr-dbtn" disabled={!canDraftNow || busyPick}
+                    onClick={() => manualPick(p.id)}>
+                    {busyPick ? '…' : 'DRAFT'}
+                  </button>
+                </div>
+              )
+            })}
+            {pool.length === 0 && <div className="dr-row"><span className="dr-nameblock">No players match.</span></div>}
+          </div>
+          {!draftDone && !previewMode && (
+            <p className="dr-status">
+              {onClockIsMe ? `Your turn — pick for ${onClockTeam?.team_name}.`
+                : isLeagueAdmin ? `Commish: tapping DRAFT picks on behalf of ${onClockTeam?.team_name}.`
+                : `Waiting for ${onClockTeam?.team_name} to pick…`}
               {league.paused ? ' · DRAFT PAUSED' : ''}
             </p>
           )}
         </div>
 
-        <div className={`draft-col ${draftTab === 'my' ? 'mshow' : ''}`}>
-          <div className="side-card queue-card">
-            <h3>My queue{displayQueue.length ? ` · ${displayQueue.length}` : ''}</h3>
+        <div className={`dr-side draft-col ${draftTab === 'my' ? 'mshow' : ''}`}>
+          {/* roster */}
+          <div className="dr-panel">
+            <div className="dr-panel-head">
+              <h3>Your roster</h3>
+              <span>{myPicks.length} of {TOTAL_ROUNDS} filled</span>
+            </div>
+            {ROSTER_SLOTS.map(slot => {
+              const p = mySlotMap[slot]
+              return (
+                <div key={slot} className="dr-slot">
+                  <span className={`dr-slot-tag ${p ? `p-${p.position}` : ''}`}>{slot}</span>
+                  <span className={`dr-slot-name ${p ? '' : 'open'}`}>{p ? p.name : 'Open'}</span>
+                  {p && <span className="dr-slot-team">{p.nfl_team || 'FA'}</span>}
+                </div>
+              )
+            })}
+            {myPicks.length > ROSTER_SLOTS.filter(s => mySlotMap[s]).length && (
+              <div className="dr-slot">
+                <span className="dr-slot-tag">BN</span>
+                <span className="dr-slot-name">
+                  {myPicks.length - ROSTER_SLOTS.filter(s => mySlotMap[s]).length} on the bench
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* queue */}
+          <div className="dr-panel">
+            <div className="dr-panel-head">
+              <h3>My queue{displayQueue.length ? ` · ${displayQueue.length}` : ''}</h3>
+              {displayQueue.length > 0 && (
+                <button className="btn btn-xs btn-ghost" onClick={() => setQueue([])}>Clear</button>
+              )}
+            </div>
             {displayQueue.length === 0 && (
-              <p className="sub" style={{ marginBottom: 0 }}>Tap ＋ on players to line up your targets. Drafted players drop off automatically.</p>
+              <p className="sub" style={{ marginBottom: 0, fontSize: 12 }}>
+                Tap QUEUE on any player to line up targets. Drafted players drop off automatically.
+              </p>
             )}
             {displayQueue.map((pid, i) => {
               const p = playersById[pid]
               return (
-                <div key={pid} className={`adv-row pos-${p.position}`} style={{ borderLeft: '3px solid transparent', paddingLeft: 6 }}>
-                  <span className="adv-name">{i + 1}. {p.name}</span>
-                  <span className="adv-meta">{p.position} · {p.nfl_team || 'FA'}</span>
+                <div key={pid} className="dr-qrow">
+                  <span className="dr-qnum">{i + 1}</span>
+                  <span className="dr-qname">{p.name}</span>
+                  <span className="dr-qmeta">{posLabel(p.position)} · {p.nfl_team || 'FA'}</span>
                   <button className="btn btn-xs btn-ghost" onClick={() => moveQueue(pid, -1)} title="Move up">↑</button>
                   <button className="btn btn-xs btn-ghost" onClick={() => moveQueue(pid, 1)} title="Move down">↓</button>
                   <button className="btn btn-xs btn-ghost" onClick={() => toggleQueue(pid)} title="Remove">✕</button>
                 </div>
               )
             })}
-            {displayQueue.length > 0 && (
-              <button className="btn btn-primary" style={{ width: '100%', marginTop: 10 }}
+          </div>
+
+          {/* sticky draft CTA */}
+          {displayQueue.length > 0 && !previewMode && (
+            <div className="dr-cta">
+              <span className="dt-label">Top of your queue</span>
+              <button className="btn btn-primary dr-cta-btn"
                 disabled={!canDraftNow || busyPick}
                 onClick={() => manualPick(displayQueue[0])}>
                 {busyPick ? 'PICKING…' : `DRAFT ${playersById[displayQueue[0]]?.name?.toUpperCase()}`}
               </button>
-            )}
-          </div>
+            </div>
+          )}
+
           <DraftAdvisor
             myPicks={myPicks}
             players={players}
             draftedSet={draftedSet}
             picksRemaining={TOTAL_ROUNDS - myPicks.length}
           />
+
           {aiTeam && aiLastPick && (
             <div className="side-card" style={{ borderColor: 'rgba(123,237,248,0.4)' }}>
               <h3>🤖 {aiTeam.team_name} just picked</h3>
-              <div className="adv-row">
-                <span className="adv-name">{aiLastPick.name}</span>
-              </div>
-              <p className="sub" style={{ marginTop: 6, fontStyle: 'italic' }}>"{aiLastPick.reason}"</p>
+              <div className="adv-row"><span className="adv-name">{aiLastPick.name}</span></div>
+              <p className="sub" style={{ marginTop: 6, fontStyle: 'italic' }}>&ldquo;{aiLastPick.reason}&rdquo;</p>
             </div>
           )}
+
           <CoachCard buildContext={() => {
             const myByPos = {}
             myPicks.forEach(p => { myByPos[p.position] = [...(myByPos[p.position] || []), p.name] })
@@ -3155,36 +3370,27 @@ ${pool}
               `TOP AVAILABLE PLAYERS (by rank):\n${availStr}\n\n` +
               `LAST FEW PICKS:\n${recent || 'none yet'}`
           }} />
+
           <div className="side-card">
             <h3>Recent picks</h3>
             <div className="feed">
-              {[...picks].reverse().slice(0, 30).map(p => (
+              {[...picks].reverse().slice(0, 20).map(p => (
                 <div key={p.id} className="feed-row">
-                  <b>#{p.pick_number}</b> {teamsById[p.team_id]?.team_name}: {playersById[p.player_id]?.name || p.player_id}
-                  <span style={{ opacity: 0.6 }}> ({playersById[p.player_id]?.position})</span>
+                  <b>{Math.floor((p.pick_number - 1) / numTeams) + 1}.{String(((p.pick_number - 1) % numTeams) + 1).padStart(2, '0')}</b>
+                  {' '}{teamsById[p.team_id]?.team_name}: {playersById[p.player_id]?.name || p.player_id}
+                  <span style={{ opacity: 0.6 }}> ({posLabel(playersById[p.player_id]?.position)})</span>
                 </div>
               ))}
-              {picks.length === 0 && <div className="feed-row">No picks yet — draft is live!</div>}
+              {picks.length === 0 && <div className="feed-row">No picks yet.</div>}
             </div>
-          </div>
-          <div className="side-card">
-            <h3>My picks ({myPicks.length}/{TOTAL_ROUNDS})</h3>
-            {myPicks.map(p => (
-              <div key={p.id} className="roster-row">
-                <span className="slot">{p.position}</span>
-                <span>{p.name} · {p.nfl_team || 'FA'}</span>
-              </div>
-            ))}
-            {myPicks.length === 0 && <p className="sub">Your picks will appear here.</p>}
           </div>
         </div>
       </div>
 
-      </div>{/* end draft-body-wrap */}
-
+      {/* ---------- draft board ---------- */}
       <div className="draft-board-tray">
         <details>
-          <summary>📋 Full draft board</summary>
+          <summary>📋 Draft board — all {TOTAL_ROUNDS} rounds, snake order</summary>
           <DraftBoardGrid
             league={league} teams={teams} picks={picks} playersById={playersById}
             numTeams={numTeams} currentPick={currentPick} secondsLeft={secondsLeft} draftDone={draftDone}
