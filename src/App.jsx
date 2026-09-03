@@ -6,8 +6,8 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.10' // bump on every deploy — shown in footer so we always know what's live
-const MAX_TEAMS = 12
+const BUILD = 'v9.12' // bump on every deploy — shown in footer so we always know what's live
+const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
 const APP_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/'
@@ -48,7 +48,7 @@ const slotAccepts = (position, slot) =>
 const BOT_NAMES = [
   'Gridiron Bots', 'Blitz Machine', 'End Zone AI', 'Pixel Pushers',
   'The Algorithms', 'Fourth & Bot', 'Circuit Breakers', 'Auto Draft FC',
-  'Binary Blitzers', 'Robo Receivers', 'Silicon Squad',
+  'Binary Blitzers',
 ]
 
 // ============================================================
@@ -642,6 +642,8 @@ select.input { appearance: none; }
 }
 
 .mu-row.viewing { border-color: var(--cyan); }
+.clock.ai-clock { color: var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
 
 /* ---------- v8.2: hamburger + drawer ---------- */
 .hamburger {
@@ -1248,7 +1250,7 @@ function LoginScreen({ onLogin }) {
     <div className="login-hero">
       <span className="logo-badge login-logo"><img className="logo-img" src={LOGO_URL} alt="BOL Agency" style={{ height: 40 }} /></span>
       <h1 className="display">BOL<br /><span className="accent">FANTASY</span><br />FOOTBALL</h1>
-      <p>12 teams. Half-PPR scoring. One office champion. Sign in with Google to claim your spot.</p>
+      <p>10 teams. Half-PPR scoring. One office champion. Sign in with Google to claim your spot.</p>
       <button className="btn btn-primary" onClick={onLogin}>Sign in with Google</button>
     </div>
   )
@@ -2351,6 +2353,90 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
 
       {seedMsg && <p className={`msg ${seedMsg.t}`}>{seedMsg.v}</p>}
 
+      {!isMock && teams.some(t => t.is_ai_team) && league.status === 'active' && (
+        <>
+          <hr className="divider" />
+          <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>AI Team — weekly lineup</h3>
+          <p className="sub">
+            Let Claude set the optimal starting lineup for the AI team each week.
+            Run after projections update (Wednesday/Thursday).
+          </p>
+          <div className="admin-actions">
+            <button className="btn btn-sm" disabled={busy} onClick={async () => {
+              setBusy(true)
+              try {
+                const aiTeam = teams.find(t => t.is_ai_team)
+                const week = league.current_week || 1
+                const { data: ro } = await supabase.from('rosters').select('*')
+                  .eq('league_id', league.id).eq('team_id', aiTeam.id).eq('week', week)
+                const ids = (ro || []).map(r => r.player_id)
+                const { data: ps } = await supabase.from('players').select('*').in('id', ids)
+                const pById = Object.fromEntries((ps || []).map(p => [p.id, p]))
+                // Fetch projections
+                const projRes = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
+                const projRaw = projRes.ok ? normalizeSleeperStats(await projRes.json()) : {}
+                const projPts = {}
+                Object.entries(projRaw).forEach(([pid, s]) => {
+                  const pts = s?.pts_half_ppr ?? s?.pts_std
+                  if (typeof pts === 'number') projPts[pid] = Math.round(pts * 10) / 10
+                })
+                const rosterStr = (ro || []).map(r => {
+                  const p = pById[r.player_id]
+                  return `${r.slot}: ${p?.name || r.player_id} (${p?.position} ${p?.nfl_team || 'FA'}) PROJ:${projPts[r.player_id] ?? '?'}`
+                }).join('\n')
+                const context =
+                  `You are the AI GM for "${aiTeam.team_name}" in a 10-team half-PPR league, week ${week}.
+
+` +
+                  `CURRENT ROSTER (slot: player, proj pts):
+${rosterStr}
+
+` +
+                  `STARTING SLOTS: QB, RB1, RB2, WR1, WR2, TE, FLEX (RB/WR/TE only), K, DEF
+
+` +
+                  `Rules: each player can only start once, FLEX must be RB/WR/TE.
+` +
+                  `Respond ONLY with JSON, no markdown:
+` +
+                  `{"QB":"player_id","RB1":"player_id","RB2":"player_id","WR1":"player_id","WR2":"player_id","TE":"player_id","FLEX":"player_id","K":"player_id","DEF":"player_id"}`
+                const { data, error } = await supabase.functions.invoke('draft-guru', {
+                  body: { context, question: 'Set the optimal lineup for this week.' }
+                })
+                if (error) throw error
+                const text = data?.text || ''
+                const jsonMatch = text.match(/\{[^}]+\}/)
+                if (!jsonMatch) throw new Error('Claude did not return valid JSON')
+                const lineup = JSON.parse(jsonMatch[0])
+                // Apply lineup: update slot for each player
+                for (const [slot, pid] of Object.entries(lineup)) {
+                  if (!ROSTER_SLOTS.includes(slot)) continue
+                  const row = (ro || []).find(r => r.player_id === pid)
+                  if (!row) continue
+                  await supabase.from('rosters').update({ slot }).eq('id', row.id)
+                  // Move displaced player to bench
+                  const displaced = (ro || []).find(r => r.slot === slot && r.player_id !== pid)
+                  if (displaced) {
+                    const benchSlot = BENCH_SLOTS.find(bs => !(ro || []).some(r => r.slot === bs && r.player_id !== displaced.player_id))
+                    if (benchSlot) await supabase.from('rosters').update({ slot: benchSlot }).eq('id', displaced.id)
+                  }
+                }
+                await supabase.from('feed_posts').insert({
+                  league_id: league.id, user_id: aiTeam.user_id,
+                  user_name: aiTeam.team_name, team_name: 'AI LINEUP',
+                  body: `Week ${week} lineup set by Claude AI. Starting: ${Object.entries(lineup).map(([s,pid]) => `${s}: ${pById[pid]?.name || pid}`).join(', ')}.`,
+                })
+                window.alert('AI lineup set and posted to the feed.')
+              } catch (err) {
+                window.alert(`AI lineup failed: ${err.message}`)
+              }
+              setBusy(false)
+            }}>
+              🤖 Set AI team lineup (week {league.current_week || 1})
+            </button>
+          </div>
+        </>
+      )}
       {!isMock && (
         <>
           <hr className="divider" />
@@ -2452,9 +2538,9 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     : null
   const onClockTeam = onClockTeamId ? teamsById[onClockTeamId] : null
   const onClockIsMe = onClockTeamId === myTeamId
-  // Bots are identified by name, not by "not me" — so real humans can join a
-  // mock for rehearsal without the admin's client autopicking their turns.
   const onClockIsBot = isMock && onClockTeam && (onClockTeam.user_name || '').startsWith('Bot ')
+  const aiTeam = teams.find(t => t.is_ai_team)
+  const onClockIsAI = !isMock && !!aiTeam && onClockTeamId === aiTeam.id
 
   // ---- data loads ----
   useEffect(() => {
@@ -2584,6 +2670,82 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     if (choice) await makePick(onClockTeamId, choice.id, currentPick)
   }, [draftDone, onClockTeamId, picks, playersById, players, draftedSet, makePick, currentPick])
 
+  const [aiThinking, setAiThinking] = useState(false)
+  const [aiLastPick, setAiLastPick] = useState(null) // { name, reason }
+
+  const doAIPick = useCallback(async () => {
+    if (draftDone || !onClockTeamId || !aiTeam) return
+    setAiThinking(true)
+    try {
+      // Build context for Claude
+      const aiPicks = picks.filter(p => p.team_id === aiTeam.id).map(p => playersById[p.player_id]).filter(Boolean)
+      const counts = {}
+      aiPicks.forEach(p => { counts[p.position] = (counts[p.position] || 0) + 1 })
+      const needed = ['QB','RB','WR','TE','K','DEF'].filter(pos => {
+        const req = { QB:1, RB:2, WR:2, TE:1, K:1, DEF:1 }
+        return (counts[pos] || 0) < req[pos]
+      })
+      const avail = players
+        .filter(p => !draftedSet.has(p.id) && (p.nfl_team || p.adp))
+        .slice(0, 30)
+      const roster = aiPicks.map(p => `${p.position}: ${p.name} (${p.nfl_team || 'FA'})`).join('\n') || 'Empty'
+      const pool = avail.map((p, i) =>
+        `${i+1}. ID:${p.id} | ${p.name} | ${p.position} | ${p.nfl_team || 'FA'}${p.last_season_avg ? ` | ${p.last_season_avg} avg` : ''}`
+      ).join('\n')
+      const round = Math.floor(currentPick / (league.draft_order?.length || 10)) + 1
+      const context =
+        `You are the AI general manager for "${aiTeam.team_name}" in a 10-team half-PPR fantasy football league.
+` +
+        `It is round ${round}, overall pick ${currentPick + 1}.
+
+` +
+        `YOUR ROSTER (${aiPicks.length} picks so far):
+${roster}
+
+` +
+        `POSITIONS STILL NEEDED: ${needed.join(', ') || 'starters filled — draft depth'}
+
+` +
+        `TOP AVAILABLE PLAYERS:
+${pool}
+
+` +
+        `Respond with ONLY this JSON on one line, no markdown, no explanation:
+` +
+        `{"player_id":"THE_SLEEPER_PLAYER_ID","reason":"one sentence"}`
+      const { data, error } = await supabase.functions.invoke('draft-guru', {
+        body: { context, question: 'Make your draft pick now.' }
+      })
+      if (error) throw error
+      const text = data?.text || ''
+      // Extract player_id from JSON response
+      const match = text.match(/"player_id"\s*:\s*"([^"]+)"/)
+      const reason = text.match(/"reason"\s*:\s*"([^"]+)"/)
+      let choice = match ? players.find(p => p.id === match[1] && !draftedSet.has(p.id)) : null
+      // Fallback: bestAvailable if Claude returns unknown/drafted player
+      if (!choice) {
+        const teamPicks = picks.filter(p => p.team_id === onClockTeamId).map(p => playersById[p.player_id]).filter(Boolean)
+        choice = bestAvailable(players, draftedSet, teamPicks)
+      }
+      if (choice) {
+        setAiLastPick({ name: choice.name, reason: reason?.[1] || 'Best available for team needs.' })
+        await makePick(onClockTeamId, choice.id, currentPick)
+        // Post to feed
+        await supabase.from('feed_posts').insert({
+          league_id: league.id, user_id: aiTeam.user_id,
+          user_name: aiTeam.team_name, team_name: 'AI PICK',
+          body: `Round ${round}, pick ${currentPick+1}: Drafted ${choice.name} (${choice.position}). ${reason?.[1] || ''}`,
+        })
+      }
+    } catch (err) {
+      console.error('AI pick failed, falling back to bestAvailable:', err)
+      const teamPicks = picks.filter(p => p.team_id === onClockTeamId).map(p => playersById[p.player_id]).filter(Boolean)
+      const choice = bestAvailable(players, draftedSet, teamPicks)
+      if (choice) await makePick(onClockTeamId, choice.id, currentPick)
+    }
+    setAiThinking(false)
+  }, [draftDone, onClockTeamId, aiTeam, picks, playersById, players, draftedSet, makePick, currentPick, league])
+
   // ---- unified pick driver (bots + expired clock), driven by the ticking `now` ----
   // Fires when: a bot's short delay elapses (mock), or the 60s clock expires (any draft).
   // The "handled" flag is set only at the moment of firing, and retries every 3s,
@@ -2602,9 +2764,10 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
     const f = firedForPick.current
     if (f.pick === currentPick && now - f.at < 3000) return
     firedForPick.current = { pick: currentPick, at: now }
-    doAutoPick()
+    if (onClockIsAI) doAIPick()
+    else doAutoPick()
   }, [now, deadlineMs, draftDone, league.paused, onClockTeamId, players.length, busyPick,
-      isLeagueAdmin, onClockIsMe, onClockIsBot, isMock, currentPick, doAutoPick, fastBots])
+      isLeagueAdmin, onClockIsMe, onClockIsBot, onClockIsAI, isMock, currentPick, doAutoPick, doAIPick, fastBots])
 
   // Admin-only: advance the clock if a non-admin pick landed (pick in DB but
   // current_pick not updated due to RLS). Fires whenever picks list changes.
@@ -2744,11 +2907,12 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
         <div className="dt-cell">
           <span className="dt-label">Time remaining</span>
           {!draftDone && (
-            <div className={`clock ${league.paused ? 'paused' : ''} ${secondsLeft != null && secondsLeft <= 10 ? 'warn' : ''}`}>
-              {league.paused ? '⏸' : secondsLeft != null ? `:${String(secondsLeft).padStart(2, '0')}` : '--'}
+            <div className={`clock ${league.paused ? 'paused' : ''} ${secondsLeft != null && secondsLeft <= 10 && !onClockIsAI ? 'warn' : ''} ${onClockIsAI ? 'ai-clock' : ''}`}>
+              {onClockIsAI ? (aiThinking ? '🤖' : '🧠') : league.paused ? '⏸' : secondsLeft != null ? `:${String(secondsLeft).padStart(2, '0')}` : '--'}
             </div>
           )}
-          {!draftDone && <span className="dt-sub">of 1:{String(DRAFT_PICK_TIMER % 60).padStart(2, '0')}</span>}
+          {!draftDone && !onClockIsAI && <span className="dt-sub">of 1:{String(DRAFT_PICK_TIMER % 60).padStart(2, '0')}</span>}
+          {onClockIsAI && <span className="dt-sub">{aiThinking ? 'Claude is thinking…' : 'AI on the clock'}</span>}
         </div>
         <div className="dt-cell dt-upnext">
           <span className="dt-label">Up next</span>
@@ -2865,6 +3029,15 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
             draftedSet={draftedSet}
             picksRemaining={TOTAL_ROUNDS - myPicks.length}
           />
+          {aiTeam && aiLastPick && (
+            <div className="side-card" style={{ borderColor: 'rgba(123,237,248,0.4)' }}>
+              <h3>🤖 {aiTeam.team_name} just picked</h3>
+              <div className="adv-row">
+                <span className="adv-name">{aiLastPick.name}</span>
+              </div>
+              <p className="sub" style={{ marginTop: 6, fontStyle: 'italic' }}>"{aiLastPick.reason}"</p>
+            </div>
+          )}
           <CoachCard buildContext={() => {
             const myByPos = {}
             myPicks.forEach(p => { myByPos[p.position] = [...(myByPos[p.position] || []), p.name] })
