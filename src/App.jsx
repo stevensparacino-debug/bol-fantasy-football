@@ -2541,7 +2541,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock }) 
   const onClockIsMe = onClockTeamId === myTeamId
   const onClockIsBot = isMock && onClockTeam && (onClockTeam.user_name || '').startsWith('Bot ')
   const aiTeam = teams.find(t => t.is_ai_team)
-  const onClockIsAI = !isMock && !!aiTeam && onClockTeamId === aiTeam.id
+  const onClockIsAI = !!aiTeam && onClockTeamId === aiTeam.id
 
   // ---- data loads ----
   useEffect(() => {
@@ -2758,7 +2758,9 @@ ${pool}
     if (!iDrive) return
     const pickStartMs = deadlineMs - DRAFT_PICK_TIMER * 1000
     const botDelay = fastBots ? 200 : BOT_PICK_DELAY_MS
-    const botDueMs = isMock && onClockIsBot ? pickStartMs + botDelay : Infinity
+    const botDueMs = (isMock && onClockIsBot) || onClockIsAI
+      ? pickStartMs + (onClockIsAI ? 2000 : botDelay)
+      : Infinity
     const expired = now >= deadlineMs + 500
     if (!expired && now < botDueMs) return
     // fire at most once per pick per 3s window (retry if the pick didn't advance)
