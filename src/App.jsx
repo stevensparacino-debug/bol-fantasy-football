@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.12' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.13' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -2070,9 +2070,10 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       BOT_NAMES.slice(0, Math.min(11, Math.max(0, parseInt(botCount) || 0))).forEach((bn, i) => {
         rows.push({
           league_id: lg.id,
-          user_id: crypto.randomUUID(), // bot identity — never signs in
-          user_name: `Bot ${String(i + 2).padStart(2, '0')}`,
-          team_name: bn,
+          user_id: crypto.randomUUID(),
+          user_name: i === 0 ? 'Claude AI' : `Bot ${String(i + 2).padStart(2, '0')}`,
+          team_name: i === 0 ? 'The Algorithm' : bn,
+          is_ai_team: i === 0, // first bot slot = AI team for testing
         })
       })
       const { error: tErr } = await supabase.from('teams').insert(rows)
