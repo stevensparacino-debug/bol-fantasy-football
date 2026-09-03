@@ -898,8 +898,7 @@ select.input { appearance: none; }
 /* --- sidebar --- */
 .dr-side {
   display: flex; flex-direction: column; gap: 12px;
-  position: sticky; top: 160px;
-  max-height: calc(100vh - 180px); overflow-y: auto; padding-right: 2px;
+  min-width: 0;
 }
 .dr-panel {
   background: var(--card); border: 1px solid var(--line);
@@ -931,11 +930,12 @@ select.input { appearance: none; }
 .dr-qname { flex: 1; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dr-qmeta { font-size: 10px; color: var(--faint); }
 .dr-cta {
-  position: sticky; bottom: 0; z-index: 5;
-  background: var(--card); border: 1px solid var(--line-strong);
+  position: fixed; right: 20px; bottom: 20px; z-index: 30;
+  width: 300px; max-width: calc(100vw - 40px);
+  background: var(--card); border: 1px solid var(--orange);
   border-radius: 10px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px;
-  box-shadow: 0 -6px 16px rgba(0,0,0,0.28);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
 }
 .dr-cta-btn { width: 100%; font-size: 14px; padding: 14px 12px; }
 
@@ -965,11 +965,11 @@ select.input { appearance: none; }
   .dr-main { grid-template-columns: 1fr; margin-top: 12px; }
   .draft-col { display: none; }
   .draft-col.mshow { display: flex; flex-direction: column; }
-  .dr-side { position: static; max-height: none; overflow: visible; }
+  .dr-cta { left: 12px; right: 12px; width: auto; bottom: 68px; }
   .dr-list { max-height: calc(100vh - 420px); min-height: 240px; }
   .dr-stat-sm { display: none; }
   .dr-qbtn { min-width: 62px; font-size: 10px; padding: 7px 8px; }
-  .dr-cta { position: sticky; bottom: 62px; }
+
 }
 @media (max-width: 560px) {
   .dr-row { gap: 8px; padding: 10px; }
@@ -3038,7 +3038,7 @@ ${pool}
 
   const round = Math.min(TOTAL_ROUNDS, Math.floor(currentPick / numTeams) + 1)
   const pickInRound = (currentPick % numTeams) + 1
-  const canDraftNow = !draftDone && !league.paused && (onClockIsMe || isLeagueAdmin)
+  const canDraftNow = !previewMode && !draftDone && !league.paused && (onClockIsMe || isLeagueAdmin)
 
   const onClockNeeds = useMemo(() => {
     if (!onClockTeamId) return ''
@@ -3341,6 +3341,14 @@ ${pool}
             picksRemaining={TOTAL_ROUNDS - myPicks.length}
           />
 
+          {aiTeam && !aiLastPick && (
+            <div className="side-card" style={{ borderColor: 'rgba(123,237,248,0.25)' }}>
+              <h3>🤖 {aiTeam.team_name}</h3>
+              <p className="sub" style={{ marginBottom: 0, fontSize: 12 }}>
+                Claude is drafting in this league. Its pick and reasoning show up here each round.
+              </p>
+            </div>
+          )}
           {aiTeam && aiLastPick && (
             <div className="side-card" style={{ borderColor: 'rgba(123,237,248,0.4)' }}>
               <h3>🤖 {aiTeam.team_name} just picked</h3>
