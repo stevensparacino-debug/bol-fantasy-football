@@ -1631,7 +1631,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         </nav>
       )}
 
-      {drafting && draftSubview !== 'draft' && (
+      {(drafting || league.status === 'locked') && draftSubview !== 'draft' && (
         <div className="draft-peek-banner" onClick={() => setDraftSubview('draft')}>
           <span>🏈 DRAFT IN PROGRESS — tap to return</span>
           {(() => {
@@ -1643,10 +1643,10 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           })()}
         </div>
       )}
-      {drafting && draftSubview === 'feed' && (
+      {(drafting || league.status === 'locked') && draftSubview === 'feed' && (
         <FeedScreen league={league} teams={teams} myTeamId={resolvedTeamId} session={session} />
       )}
-      {drafting && draftSubview === 'league' && (
+      {(drafting || league.status === 'locked') && draftSubview === 'league' && (
         <LeagueHome league={league} teams={teams} myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin} isMock={isMock} session={session}
           onEnterMock={onEnterMock} onExitMock={onExitMock} reloadTop={reloadTop}
@@ -2065,7 +2065,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       const displayName = session.user.user_metadata?.full_name?.split(' ')[0] || 'Commish'
       const rows = [{
         league_id: lg.id, user_id: session.user.id,
-        user_name: displayName, team_name: 'My Mock Team',
+        user_name: displayName, team_name: 'My Mock Team', is_ai_team: false,
       }]
       BOT_NAMES.slice(0, Math.min(11, Math.max(0, parseInt(botCount) || 0))).forEach((bn, i) => {
         rows.push({
