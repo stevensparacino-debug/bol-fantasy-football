@@ -895,7 +895,8 @@ select.input { appearance: none; }
   font-size: 10px; color: var(--faint); text-transform: uppercase;
   letter-spacing: 0.06em; margin-top: 2px;
 }
-.dr-hint.fills { color: var(--cyan); font-weight: 700; }
+.dr-hint .dr-team { color: var(--muted); font-weight: 700; }
+.dr-hint .fills { color: var(--cyan); font-weight: 700; }
 .dr-stat { display: flex; flex-direction: column; align-items: flex-end; min-width: 56px; }
 .dr-stat b {
   font-family: 'Archivo Narrow', sans-serif; font-size: 17px; line-height: 1.1;
@@ -2976,7 +2977,7 @@ ${pool}
         await supabase.from('feed_posts').insert({
           league_id: league.id, user_id: aiTeam.user_id,
           user_name: aiTeam.team_name, team_name: 'AI PICK',
-          body: `Round ${round}, pick ${currentPick+1}: Drafted ${choice.name} (${choice.position}). ${reason?.[1] || ''}`,
+          body: `Round ${round}, pick ${currentPick+1}: Drafted ${choice.name} (${choice.position} · ${choice.nfl_team || 'FA'}). ${reason?.[1] || ''}`,
         })
       }
     } catch (err) {
@@ -3263,8 +3264,10 @@ ${pool}
                   <span className={`dr-pos p-${p.position}`}>{posLabel(p.position)}</span>
                   <div className="dr-nameblock">
                     <div className="dr-name">{p.name}</div>
-                    <div className={`dr-hint ${hint ? 'fills' : ''}`}>
-                      {hint || `${p.nfl_team || 'FA'}${p.status && p.status !== 'active' ? ` · ${p.status}` : ''}`}
+                    <div className="dr-hint">
+                      <span className="dr-team">{p.nfl_team || 'FA'}</span>
+                      {hint && <span className="fills"> · {hint}</span>}
+                      {!hint && p.status && p.status !== 'active' && <span> · {p.status}</span>}
                     </div>
                   </div>
                   <div className="dr-stat">
@@ -3311,7 +3314,7 @@ ${pool}
                 <div key={slot} className="dr-slot">
                   <span className={`dr-slot-tag ${p ? `p-${p.position}` : ''}`}>{slot}</span>
                   <span className={`dr-slot-name ${p ? '' : 'open'}`}>{p ? p.name : 'Open'}</span>
-                  {p && <span className="dr-slot-team">{p.nfl_team || 'FA'}</span>}
+                  {p && <span className="dr-slot-team">{posLabel(p.position)} · {p.nfl_team || 'FA'}</span>}
                 </div>
               )
             })}
@@ -3417,7 +3420,9 @@ ${pool}
                 <div key={p.id} className="feed-row">
                   <b>{Math.floor((p.pick_number - 1) / numTeams) + 1}.{String(((p.pick_number - 1) % numTeams) + 1).padStart(2, '0')}</b>
                   {' '}{teamsById[p.team_id]?.team_name}: {playersById[p.player_id]?.name || p.player_id}
-                  <span style={{ opacity: 0.6 }}> ({posLabel(playersById[p.player_id]?.position)})</span>
+                  <span style={{ opacity: 0.6 }}>
+                    {' '}({posLabel(playersById[p.player_id]?.position)} · {playersById[p.player_id]?.nfl_team || 'FA'})
+                  </span>
                 </div>
               ))}
               {picks.length === 0 && <div className="feed-row">No picks yet.</div>}
@@ -5358,7 +5363,8 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
             <span className="lname">
               {p.name}{injuryTag(p) && <span className={`inj-tag ${injuryTag(p) === 'OUT' || injuryTag(p) === 'IR' ? 'bad' : ''}`}>{injuryTag(p)}</span>}
               <span className="lmeta" style={{ display: 'block' }}>
-                {statLine(stats[p.id], p.position) || `${p.position} · ${p.nfl_team || 'FA'}`}
+                {p.position} · {p.nfl_team || 'FA'}
+                {statLine(stats[p.id], p.position) ? ` · ${statLine(stats[p.id], p.position)}` : ''}
                 {injuryTag(p) === 'OUT' && ' · swap recommended'}
               </span>
             </span>
