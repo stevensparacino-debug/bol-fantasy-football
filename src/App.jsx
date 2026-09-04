@@ -654,6 +654,26 @@ select.input { appearance: none; }
 }
 
 .mu-row.viewing { border-color: var(--cyan); }
+
+/* ---------- draft grades ---------- */
+.dg-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; margin-bottom: 6px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+}
+.dg-rank { font-size: 12px; color: var(--faint); min-width: 18px; }
+.dg-grade {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 22px;
+  min-width: 44px; text-align: center; color: var(--cyan);
+}
+.dg-grade.g-A { color: var(--lime); }
+.dg-grade.g-B { color: var(--cyan); }
+.dg-grade.g-C { color: var(--yellow); }
+.dg-name { flex: 1; font-weight: 700; font-size: 14px; min-width: 0; }
+.dg-stat { display: flex; flex-direction: column; align-items: flex-end; min-width: 62px; }
+.dg-stat b { font-family: 'Archivo Narrow', sans-serif; font-size: 17px; font-variant-numeric: tabular-nums; }
+.dg-stat span { font-size: 8px; color: var(--faint); letter-spacing: 0.1em; }
+@media (max-width: 560px) { .dg-stat:first-of-type { display: none; } }
 .clock.ai-clock { color: var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
 
@@ -1976,6 +1996,10 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
     <>
       {league.status === 'active' && (
         <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} onStandings={() => setTab && setTab('standings')} />
+      )}
+      {league.status === 'active' && (
+        <DraftGrades league={league} teams={teams} myTeamId={myTeamId}
+          isLeagueAdmin={isLeagueAdmin} session={session} />
       )}
       {(league.status === 'setup' || league.status === 'locked') && !isMock && (
         <>
@@ -5887,6 +5911,168 @@ function DraftOrderCard({ league, teams, myTeamId }) {
         </div>
       ))}
       <p className="sub" style={{ marginTop: 8 }}>Snake format — round 2 runs in reverse, so pick 12 gets back-to-back selections.</p>
+    </div>
+  )
+}
+
+// ============================================================
+// DRAFT GRADES — computed from starter strength, draft value, and balance
+// ============================================================
+function DraftGrades({ league, teams, myTeamId, isLeagueAdmin, session }) {
+  const [picks, setPicks] = useState([])
+  const [playersById, setPlayersById] = useState({})
+  const [open, setOpen] = useState(true)
+  const [coachBusy, setCoachBusy] = useState(false)
+  const [coachMsg, setCoachMsg] = useState(null)
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const { data: pk } = await supabase.from('draft_picks').select('*')
+        .eq('league_id', league.id).order('pick_number', { ascending: true })
+      if (!mounted) return
+      setPicks(pk || [])
+      const ids = [...new Set((pk || []).map(p => p.player_id))]
+      const byId = {}
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: ps } = await supabase.from('players').select('*').in('id', ids.slice(i, i + 300))
+        ;(ps || []).forEach(p => { byId[p.id] = p })
+      }
+      if (mounted) setPlayersById(byId)
+    })()
+    return () => { mounted = false }
+  }, [league.id])
+
+  const grades = useMemo(() => {
+    if (picks.length === 0 || Object.keys(playersById).length === 0) return []
+    const rows = teams.map(t => {
+      const myPicks = picks.filter(p => p.team_id === t.id)
+      const players = myPicks.map(p => playersById[p.player_id]).filter(Boolean)
+      const sorted = [...players].sort((a, b) => (a.adp ?? 1e9) - (b.adp ?? 1e9))
+      const slots = autoAssignSlots(sorted)
+      const byId = Object.fromEntries(players.map(p => [p.id, p]))
+      // starter strength = 2025 points/game of the 9 starters
+      const starterPPG = slots
+        .filter(s => ROSTER_SLOTS.includes(s.slot))
+        .reduce((sum, s) => sum + (byId[s.player_id]?.last_season_avg || 0), 0)
+      // value = drafted later than their rank is good
+      let valueSum = 0, valued = 0, bestSteal = null
+      myPicks.forEach(p => {
+        const pl = playersById[p.player_id]
+        if (!pl || pl.adp == null || pl.adp >= 7000) return
+        const diff = pl.adp - p.pick_number   // positive = fell to them
+        valueSum += diff; valued++
+        if (!bestSteal || diff > bestSteal.diff) bestSteal = { name: pl.name, pos: pl.position, diff, pick: p.pick_number }
+      })
+      const avgValue = valued ? valueSum / valued : 0
+      // balance = every starting slot filled
+      const filled = ROSTER_SLOTS.filter(sl => slots.some(s => s.slot === sl)).length
+      return { team: t, starterPPG, avgValue, filled, bestSteal, count: players.length }
+    })
+    // normalize into a 0-100 score
+    const ppgs = rows.map(r => r.starterPPG)
+    const vals = rows.map(r => r.avgValue)
+    const norm = (v, arr) => {
+      const lo = Math.min(...arr), hi = Math.max(...arr)
+      return hi === lo ? 0.5 : (v - lo) / (hi - lo)
+    }
+    return rows.map(r => {
+      const score = Math.round(
+        norm(r.starterPPG, ppgs) * 62 +
+        norm(r.avgValue, vals) * 26 +
+        (r.filled / ROSTER_SLOTS.length) * 12
+      )
+      const grade =
+        score >= 88 ? 'A+' : score >= 78 ? 'A' : score >= 68 ? 'A−' :
+        score >= 58 ? 'B+' : score >= 48 ? 'B' : score >= 38 ? 'B−' :
+        score >= 28 ? 'C+' : score >= 18 ? 'C' : 'C−'
+      return { ...r, score, grade }
+    }).sort((a, b) => b.score - a.score)
+  }, [picks, playersById, teams])
+
+  const askCoach = async () => {
+    setCoachBusy(true); setCoachMsg(null)
+    try {
+      const summary = grades.map((g, i) => {
+        const roster = picks.filter(p => p.team_id === g.team.id)
+          .map(p => playersById[p.player_id])
+          .filter(Boolean)
+          .slice(0, 8)
+          .map(p => `${p.name} (${p.position})`).join(', ')
+        return `${i + 1}. ${g.team.team_name} [${g.grade}] — ${roster}`
+      }).join('\n')
+      const context =
+        `WEEK ZERO DRAFT RECAP — the draft just finished in our ${MAX_TEAMS}-team half-PPR office league.\n\n` +
+        `Teams ranked by our draft-grade model, with their top picks:\n${summary}\n\n` +
+        `Write a fun 5-8 sentence draft recap. Call out the best draft, the most questionable one, ` +
+        `and one specific pick you loved or hated. Use real team and player names from above.`
+      const { data, error } = await supabase.functions.invoke('draft-guru', {
+        body: { context, question: 'Grade our draft, Coach!' },
+      })
+      if (error) throw error
+      await supabase.from('feed_posts').insert({
+        league_id: league.id, user_id: session.user.id,
+        user_name: 'Coach Sunday', team_name: 'DRAFT RECAP',
+        body: (data?.text || '').slice(0, 500),
+      })
+      setCoachMsg({ t: 'ok', v: 'Coach posted the draft recap to the Feed.' })
+    } catch (e) {
+      setCoachMsg({ t: 'err', v: `Coach is off the air: ${e.message}` })
+    }
+    setCoachBusy(false)
+  }
+
+  if (grades.length === 0) return null
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h2 style={{ marginBottom: 2 }}>Draft grades</h2>
+          <p className="sub" style={{ marginBottom: 0 }}>
+            Starter strength (2025 PPG) + value vs. draft position + roster balance.
+          </p>
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show'}</button>
+      </div>
+
+      {open && (
+        <>
+          <div style={{ marginTop: 14 }}>
+            {grades.map((g, i) => (
+              <div key={g.team.id} className="dg-row"
+                style={g.team.id === myTeamId ? { borderColor: 'var(--orange)', background: 'rgba(248,94,50,0.08)' } : undefined}>
+                <span className="dg-rank">{i + 1}</span>
+                <span className={`dg-grade g-${g.grade.replace(/[^A-C]/g, '')}`}>{g.grade}</span>
+                <div className="dg-name">
+                  {g.team.team_name}{g.team.id === myTeamId ? ' · YOU' : ''}
+                  <span className="lmeta" style={{ display: 'block' }}>
+                    {g.bestSteal && g.bestSteal.diff > 0
+                      ? `Best value: ${g.bestSteal.name} (${g.bestSteal.pos}) at pick ${g.bestSteal.pick}`
+                      : `${g.count} players drafted`}
+                  </span>
+                </div>
+                <div className="dg-stat">
+                  <b>{g.starterPPG.toFixed(1)}</b>
+                  <span>STARTER PPG</span>
+                </div>
+                <div className="dg-stat">
+                  <b>{g.score}</b>
+                  <span>SCORE</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {isLeagueAdmin && (
+            <div className="admin-actions" style={{ marginTop: 12 }}>
+              <button className="btn btn-sm btn-turf" disabled={coachBusy} onClick={askCoach}>
+                {coachBusy ? 'Coach is writing…' : '🏈 Coach: recap the draft'}
+              </button>
+            </div>
+          )}
+          {coachMsg && <p className={`msg ${coachMsg.t}`}>{coachMsg.v}</p>}
+        </>
+      )}
     </div>
   )
 }
