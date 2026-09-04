@@ -1129,7 +1129,7 @@ function fantasyPoints(s, position) {
 }
 
 // Round-robin schedule: every team plays every week, opponents rotate.
-// 12 teams -> 11 unique rounds; weeks 12-13 repeat rounds 1-2.
+// N teams -> N-1 unique rounds; later weeks repeat from the start.
 function roundRobin(teamIds, weeks) {
   const arr = [...teamIds]
   if (arr.length % 2 !== 0) arr.push(null)
@@ -1554,7 +1554,7 @@ function Lobby({ session, isAdmin, onDone, mockLeague, onEnterMock }) {
     const { count } = await supabase
       .from('teams').select('id', { count: 'exact', head: true })
       .eq('league_id', lg.id)
-    if ((count || 0) >= MAX_TEAMS) { setMsg({ t: 'err', v: 'League is full (12 teams).' }); setBusy(false); return }
+    if ((count || 0) >= MAX_TEAMS) { setMsg({ t: 'err', v: `League is full (${MAX_TEAMS} teams).` }); setBusy(false); return }
     const { error: tErr } = await supabase.from('teams').insert({
       league_id: lg.id, user_id: session.user.id,
       user_name: displayName, team_name: teamName.trim(),
@@ -1814,9 +1814,11 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   const drafting = league.status === 'drafting'
   const active = league.status === 'active'
   const preDraft = league.status === 'setup' || league.status === 'locked'
-  const [draftSubview, setDraftSubview] = useState('draft') // 'draft' | 'league' | 'feed'
-  // Auto-return to draft when draft room is entered
-  useEffect(() => { if (drafting) setDraftSubview('draft') }, [drafting])
+  const [draftSubview, setDraftSubview] = useState('league') // 'draft' | 'league' | 'feed'
+  useEffect(() => {
+    if (league.status === 'drafting') setDraftSubview('draft')
+    else if (league.status === 'locked') setDraftSubview('league')
+  }, [league.status])
 
   return (
     <>
@@ -1834,15 +1836,21 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           <button className={`tab ${tab === 'players' ? 'on' : ''}`} onClick={() => setTab('players')}>Players</button>
           <button className={`tab ${tab === 'standings' ? 'on' : ''}`} onClick={() => setTab('standings')}>Standings</button>
           <button className={`tab ${tab === 'feed' ? 'on' : ''}`} onClick={() => setTab('feed')}>Feed</button>
+          {(drafting || league.status === 'locked') && (
+            <button className={`tab ${draftSubview === 'draft' ? 'on' : ''}`}
+              onClick={() => setDraftSubview('draft')}>
+              🏈 Draft room
+            </button>
+          )}
         </div>
       )}
 
       {(active || preDraft || drafting) && (
         <nav className="bottom-nav">
-          {drafting ? (
+          {(drafting || league.status === 'locked') ? (
             <>
               <button className={`bn-item ${draftSubview==='draft'?'on':''}`}
-                onClick={() => setDraftSubview('draft')}>🏈 Draft</button>
+                onClick={() => setDraftSubview('draft')}>{drafting ? '🏈 Draft' : '📋 Draft'}</button>
               <button className={`bn-item ${draftSubview==='league'?'on':''}`}
                 onClick={() => setDraftSubview('league')}>League</button>
               <button className={`bn-item ${draftSubview==='feed'?'on':''}`}
@@ -1861,7 +1869,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 
       {(drafting || league.status === 'locked') && draftSubview !== 'draft' && (
         <div className="draft-peek-banner" onClick={() => setDraftSubview('draft')}>
-          <span>🏈 DRAFT IN PROGRESS — tap to return</span>
+          <span>{drafting ? '🏈 DRAFT IN PROGRESS — tap to return' : '📋 DRAFT ROOM IS OPEN — tap to build your queue'}</span>
           {(() => {
             const onId = league.draft_order?.[
               (() => { const n = league.current_pick ?? 0; const nt = league.draft_order?.length || teams.length; const r = Math.floor(n/nt); return r%2===0 ? n%nt : nt-1-n%nt })()
@@ -1880,7 +1888,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           onEnterMock={onEnterMock} onExitMock={onExitMock} reloadTop={reloadTop}
           setTab={v => { setTab(v); setDraftSubview('draft') }} />
       )}
-      {drafting && draftSubview === 'draft' ? (
+      {(drafting || league.status === 'locked') && draftSubview === 'draft' ? (
         <DraftRoom
           session={session}
           league={league}
@@ -1888,6 +1896,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin}
           isMock={isMock}
+          previewMode={!drafting}
         />
       ) : active && tab === 'team' ? (
         <TeamPage2
@@ -2615,7 +2624,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
                 }).join('\n')
                 const context =
                   AI_GM_PERSONA + '\n\n' +
-                  `You are the AI GM for "${aiTeam.team_name}" in a 10-team half-PPR league, week ${week}.
+                  `You are the AI GM for "${aiTeam.team_name}" in a ${MAX_TEAMS}-team half-PPR league, week ${week}.
 
 ` +
                   `CURRENT ROSTER (slot: player, proj pts):
@@ -2927,7 +2936,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock, pr
       const round = Math.floor(currentPick / (league.draft_order?.length || 10)) + 1
       const context =
         AI_GM_PERSONA + '\n\n' +
-        `You are the AI general manager for "${aiTeam.team_name}" in a 10-team half-PPR fantasy football league.
+        `You are the AI general manager for "${aiTeam.team_name}" in a ${MAX_TEAMS}-team half-PPR fantasy football league.
 ` +
         `It is round ${round}, overall pick ${currentPick + 1}.
 
@@ -4641,7 +4650,7 @@ function TradesPanel({ league, teams, myTeamId }) {
     }
     const context =
       `TRADE ANALYSIS REQUEST — no live draft pick is happening.\n` +
-      `Proposed trade in a 12-team half-PPR league, week ${week}:\n` +
+      `Proposed trade in a ${MAX_TEAMS}-team half-PPR league, week ${week}:\n` +
       `${teamsById[tr.from_team_id]?.team_name} sends: ${(tr.from_player_ids || []).map(nameLine).join('; ')}\n` +
       `${teamsById[tr.to_team_id]?.team_name} sends: ${(tr.to_player_ids || []).map(nameLine).join('; ')}\n` +
       `The manager asking is ${teamsById[myTeamId]?.team_name}. Analyze who wins this trade and why, in 60-90 words.`
@@ -5523,7 +5532,7 @@ function FeedScreen({ league, teams, myTeamId, session }) {
       }, null)
       const context =
         `WEEK RECAP REQUEST — no live draft pick is happening.\n` +
-        `Week ${wk} final results in our 12-team half-PPR office league:\n${results}\n` +
+        `Week ${wk} final results in our ${MAX_TEAMS}-team half-PPR office league:\n${results}\n` +
         `Highest score: ${high?.team} with ${high?.pts.toFixed(1)}.\n` +
         `Write a punchy, funny 4-6 sentence recap of the week. Reference real teams and scores above only.`
       const { data, error } = await supabase.functions.invoke('draft-guru', {
