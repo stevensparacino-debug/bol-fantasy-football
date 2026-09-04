@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.29' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.31' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1842,6 +1842,14 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
     return () => { mounted = false; supabase.removeChannel(channel) }
   }, [leagueId])
 
+  // The draft room is just another tab value ('draft') so tab clicks always win.
+  // NOTE: this hook must stay ABOVE the early return below — React requires the
+  // same number of hooks on every render.
+  useEffect(() => {
+    if (league?.status === 'drafting') setTab('draft')
+    else if (league?.status === 'locked') setTab('home')
+  }, [league?.status])
+
   if (!league) return <p>Loading league…</p>
 
   // If myTeamId is null (e.g. non-admin just joined a mock and app state
@@ -1853,11 +1861,6 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   const drafting = league.status === 'drafting'
   const active = league.status === 'active'
   const preDraft = league.status === 'setup' || league.status === 'locked'
-  // The draft room is just another tab value ('draft') so tab clicks always win
-  useEffect(() => {
-    if (league.status === 'drafting') setTab('draft')
-    else if (league.status === 'locked') setTab('home')
-  }, [league.status])
 
   return (
     <>
@@ -5959,13 +5962,19 @@ function DraftGrades({ league, teams, myTeamId, isLeagueAdmin, session }) {
         .filter(s => ROSTER_SLOTS.includes(s.slot))
         .reduce((sum, s) => sum + (byId[s.player_id]?.last_season_avg || 0), 0)
       // value = drafted later than their rank is good
+      // Value = drafted LATER than the player's rank (he fell to you).
+      // K and DEF are excluded: their ranks are artificial, so every late
+      // kicker would register as a massive "steal".
       let valueSum = 0, valued = 0, bestSteal = null
       myPicks.forEach(p => {
         const pl = playersById[p.player_id]
         if (!pl || pl.adp == null || pl.adp >= 7000) return
-        const diff = pl.adp - p.pick_number   // positive = fell to them
+        if (pl.position === 'K' || pl.position === 'DEF') return
+        const diff = p.pick_number - pl.adp   // positive = he fell to you
         valueSum += diff; valued++
-        if (!bestSteal || diff > bestSteal.diff) bestSteal = { name: pl.name, pos: pl.position, diff, pick: p.pick_number }
+        if (!bestSteal || diff > bestSteal.diff) {
+          bestSteal = { name: pl.name, pos: pl.position, diff, pick: p.pick_number, rank: pl.adp }
+        }
       })
       const avgValue = valued ? valueSum / valued : 0
       // balance = every starting slot filled
@@ -6051,8 +6060,8 @@ function DraftGrades({ league, teams, myTeamId, isLeagueAdmin, session }) {
                   {g.team.team_name}{g.team.id === myTeamId ? ' · YOU' : ''}
                   <span className="lmeta" style={{ display: 'block' }}>
                     {g.bestSteal && g.bestSteal.diff > 0
-                      ? `Best value: ${g.bestSteal.name} (${g.bestSteal.pos}) at pick ${g.bestSteal.pick}`
-                      : `${g.count} players drafted`}
+                      ? `Best value: ${g.bestSteal.name} (${g.bestSteal.pos}) — ranked ${g.bestSteal.rank}, taken ${g.bestSteal.pick}`
+                      : `${g.count} players drafted · no bargains`}
                   </span>
                 </div>
                 <div className="dg-stat">
