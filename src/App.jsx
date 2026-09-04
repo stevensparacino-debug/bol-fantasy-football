@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.34' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.35' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -654,6 +654,11 @@ select.input { appearance: none; }
 }
 
 .mu-row.viewing { border-color: var(--cyan); }
+.nav-badge {
+  display: inline-block; margin-left: 5px; min-width: 16px; padding: 1px 5px;
+  background: var(--red); color: #fff; border-radius: 999px;
+  font-size: 9px; font-weight: 700; vertical-align: middle;
+}
 
 /* ---------- lineup swap picker ---------- */
 .swap-cue {
@@ -1778,6 +1783,20 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   // (RLS only lets the admin write both teams' rosters). Runs on load and
   // whenever a trade row changes.
   const [tradeTick, setTradeTick] = useState(0)
+  const [pendingTrades, setPendingTrades] = useState(0)
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const tid = myTeamId || teams.find(t => t.user_id === session.user.id)?.id
+      if (!tid) return
+      const { count } = await supabase.from('trades')
+        .select('id', { count: 'exact', head: true })
+        .eq('league_id', leagueId).eq('to_team_id', tid).eq('status', 'pending')
+      if (mounted) setPendingTrades(count || 0)
+    })()
+    return () => { mounted = false }
+  }, [leagueId, myTeamId, teams, session.user.id, tradeTick])
+
   useEffect(() => {
     const channel = supabase
       .channel(`trades-${leagueId}`)
@@ -1913,7 +1932,9 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
       {(active || preDraft) && (
         <div className="tabs top-tabs">
           <button className={`tab ${tab === 'home' ? 'on' : ''}`} onClick={() => setTab('home')}>League</button>
-          <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>Team</button>
+          <button className={`tab ${tab === 'team' ? 'on' : ''}`} onClick={() => setTab('team')}>
+            Team{pendingTrades > 0 && <span className="nav-badge">{pendingTrades}</span>}
+          </button>
           <button className={`tab ${tab === 'scores' ? 'on' : ''}`} onClick={() => setTab('scores')}>Matchup</button>
           <button className={`tab ${tab === 'players' ? 'on' : ''}`} onClick={() => setTab('players')}>Players</button>
           <button className={`tab ${tab === 'standings' ? 'on' : ''}`} onClick={() => setTab('standings')}>Standings</button>
@@ -1943,7 +1964,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
             ['players', 'Players'], ['feed', 'Feed'],
           ].map(([key, label]) => (
             <button key={key} className={`bn-item ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>
-              {label}
+              {label}{key === 'team' && pendingTrades > 0 && <span className="nav-badge">{pendingTrades}</span>}
             </button>
           ))}
         </nav>
@@ -2010,6 +2031,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           onExitMock={onExitMock}
           reloadTop={reloadTop}
           setTab={setTab}
+          pendingTrades={pendingTrades}
         />
       )}
     </>
@@ -2019,7 +2041,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 // ============================================================
 // LEAGUE HOME
 // ============================================================
-function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, onEnterMock, onExitMock, reloadTop, setTab }) {
+function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, onEnterMock, onExitMock, reloadTop, setTab, pendingTrades = 0 }) {
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
   const [renameBusy, setRenameBusy] = useState(false)
@@ -2039,6 +2061,14 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
     <>
       {league.status === 'active' && (
         <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} onStandings={() => setTab && setTab('standings')} />
+      )}
+      {pendingTrades > 0 && (
+        <div className="alert-banner" style={{ marginTop: 0, marginBottom: 16 }}>
+          <span>
+            <b>TRADE OFFER</b> — you have {pendingTrades} pending offer{pendingTrades > 1 ? 's' : ''} waiting on a response.
+          </span>
+          <button className="btn btn-xs btn-primary" onClick={() => setTab && setTab('team')}>REVIEW</button>
+        </div>
       )}
       {league.status === 'active' && (
         <DraftGrades league={league} teams={teams} myTeamId={myTeamId}
@@ -4819,7 +4849,23 @@ function TradesPanel({ league, teams, myTeamId }) {
       note: note.trim() ? note.trim().slice(0, 300) : null,
     })
     if (error) setMsg({ t: 'err', v: error.message })
-    else { setMsg({ t: 'ok', v: 'Trade proposed — waiting on the other manager.' }); setProposing(false) }
+    else {
+      setMsg({ t: 'ok', v: 'Trade proposed — waiting on the other manager.' })
+      setProposing(false)
+      // Surface it in the feed so the other manager actually sees it
+      try {
+        await supabase.from('feed_posts').insert({
+          league_id: league.id,
+          user_id: (await supabase.auth.getUser()).data.user.id,
+          user_name: teamsById[myTeamId]?.team_name || 'A team',
+          team_name: 'TRADE OFFER',
+          body: `${teamsById[myTeamId]?.team_name} offered ${teamsById[targetTeamId]?.team_name} a trade: ` +
+            `${giveIds.map(pid => playersById[pid]?.name || pid).join(', ')} for ` +
+            `${getIds.map(pid => playersById[pid]?.name || pid).join(', ')}.` +
+            (note.trim() ? `\n\n"${note.trim()}"` : ''),
+        })
+      } catch { /* feed post is a nicety, never block the trade */ }
+    }
     setBusy(false)
     loadTrades()
   }
