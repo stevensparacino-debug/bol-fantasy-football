@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.35' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.36' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -548,20 +548,28 @@ select.input { appearance: none; }
   display: none;
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
   background: var(--surface); border-top: 1px solid var(--line-strong);
-  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
 }
 .bn-item {
   flex: 1; background: transparent; border: none; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   font-family: 'Archivo Narrow', sans-serif; font-weight: 700; text-transform: uppercase;
-  font-size: 11px; letter-spacing: 0.1em; color: var(--faint);
-  padding: 10px 2px; border-radius: 6px;
+  font-size: 10px; letter-spacing: 0.06em; color: var(--faint);
+  padding: 9px 2px 7px; border-radius: 8px; min-height: 58px;
+  -webkit-tap-highlight-color: transparent;
 }
+.bn-item svg { display: block; }
 .bn-item.on { color: var(--orange); }
+.bn-item:active { background: var(--raise); }
+.bn-ico { position: relative; display: inline-flex; }
+.bn-ico .nav-badge {
+  position: absolute; top: -5px; right: -9px; margin: 0;
+}
 @media (max-width: 860px) {
   .bottom-nav { display: flex; }
   .top-tabs { display: none; }
-  .main { padding-bottom: 110px; }
-  .footer { padding-bottom: 70px; }
+  .main { padding-bottom: 120px; }
+  .footer { padding-bottom: 80px; }
 }
 .strip-link { cursor: pointer; }
 .strip-link:hover b { color: var(--orange); }
@@ -1049,6 +1057,102 @@ select.input { appearance: none; }
   .dr-qbtn { display: none; }
 }
 
+/* ================= v9.36: mobile overflow pass ================= */
+/* Long player and team names must never push a row off screen */
+.lineup-row, .mu-row, .h2h-row, .dg-row, .pool-row, .swap-opt, .trade-row, .adv-row {
+  min-width: 0;
+}
+.lname, .mu-team, .h2h-name, .dg-name, .pname, .swap-name, .adv-name,
+.hero-team, .dr-name, .dr-slot-name, .fp-body, .tname {
+  min-width: 0; overflow-wrap: anywhere;
+}
+.card, .side-card, .dr-panel { overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .main { padding-left: 14px; padding-right: 14px; }
+  .card { padding: 16px 14px; }
+  .card h2 { font-size: 20px; }
+  .login-hero h1 { font-size: clamp(44px, 15vw, 92px); }
+
+  /* rows: tighter gaps, wrapping names, no clipped stats */
+  .lineup-row { gap: 8px; padding: 10px; font-size: 13px; }
+  .lineup-row .lslot { min-width: 38px; font-size: 11px; }
+  .lname { white-space: normal; }
+  .tp-col { min-width: 38px; font-size: 11px; }
+  .tp-thead { gap: 8px; padding: 4px 10px 6px; font-size: 8px; }
+
+  /* matchup hero: stack the win bar under the two teams */
+  .hero-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hero-mid { grid-column: 1 / -1; order: 3; flex-direction: row; gap: 10px; min-width: 0; }
+  .hero-score { font-size: 34px; }
+  .hero-team { font-size: 14px; }
+  .hero-proj { font-size: 10px; }
+
+  /* head to head rows */
+  .h2h-row { gap: 6px; padding: 8px; font-size: 12px; }
+  .h2h-name { font-size: 12px; }
+  .h2h-meta { font-size: 9px; }
+  .h2h-pts { min-width: 38px; font-size: 12px; }
+  .h2h-slot { min-width: 30px; font-size: 10px; }
+  .h2h-thead { gap: 6px; padding: 4px 8px 6px; font-size: 8px; }
+
+  /* scoreboard rows */
+  .mu-row { gap: 6px; padding: 10px 8px; font-size: 12px; }
+  .mu-score { font-size: 18px; min-width: 46px; }
+
+  /* stat strips wrap instead of squeezing */
+  .stat-strip { flex-wrap: wrap; }
+  .stat-strip > div { flex: 1 1 40%; min-width: 40%; }
+  .stat-strip b { font-size: 16px; }
+
+  /* draft grades */
+  .dg-row { gap: 8px; padding: 10px; }
+  .dg-grade { font-size: 18px; min-width: 34px; }
+  .dg-name { font-size: 13px; }
+
+  /* free agents / pool rows */
+  .pool-row { gap: 8px; padding: 10px; flex-wrap: wrap; }
+  .pool-row .pname { flex: 1 1 100%; }
+  .pool-row .pmeta, .pool-row .prank { font-size: 10px; min-width: 0; }
+
+  /* tables scroll rather than clip */
+  .board-scroll { -webkit-overflow-scrolling: touch; }
+  .board { font-size: 10px; }
+  .board th, .board td { padding: 5px 6px; }
+
+  /* tabs and chips wrap cleanly */
+  .tabs { gap: 4px; }
+  .tab { padding: 8px 12px; font-size: 12px; }
+  .chip { padding: 7px 11px; font-size: 10px; }
+
+  /* feed */
+  .feed-post { padding: 11px 12px; }
+  .fp-head b { font-size: 12px; }
+  .fp-body { font-size: 13px; }
+
+  /* forms stack full width */
+  .field { flex-direction: column; align-items: stretch; }
+  .field .btn { width: 100%; }
+  .input { min-width: 0; width: 100%; }
+  .admin-actions .btn { flex: 1 1 100%; }
+  .code-chip { font-size: 22px; letter-spacing: 0.18em; }
+
+  /* countdown */
+  .cd-cell { padding: 10px 4px; }
+  .cd-num { font-size: clamp(26px, 9vw, 40px); }
+
+  /* swap picker */
+  .swap-opt { gap: 8px; padding: 10px 8px; font-size: 12px; }
+  .swap-slot { min-width: 32px; }
+}
+
+@media (max-width: 420px) {
+  .bn-item { font-size: 9px; letter-spacing: 0.02em; }
+  .hero-score { font-size: 28px; }
+  .tp-col { min-width: 34px; }
+  .dg-stat { min-width: 46px; }
+}
+
 @media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
 `
 
@@ -1529,6 +1633,37 @@ function App() {
 }
 
 // ============================================================
+// NAV ICONS
+// ============================================================
+const NavIcon = ({ name }) => {
+  const common = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none',
+    stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  switch (name) {
+    case 'league': return (
+      <svg {...common}><path d="M6 3h12v5a6 6 0 0 1-12 0V3Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" />
+        <path d="M18 5h3v2a3 3 0 0 1-3 3" /><path d="M12 14v4" /><path d="M8 21h8" /></svg>
+    )
+    case 'team': return (
+      <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+    )
+    case 'matchup': return (
+      <svg {...common}><path d="M4 5v14" /><path d="M20 5v14" /><path d="M8 9l4 3-4 3" /><path d="M16 9l-4 3 4 3" /></svg>
+    )
+    case 'players': return (
+      <svg {...common}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="M11 8v6" /><path d="M8 11h6" /></svg>
+    )
+    case 'feed': return (
+      <svg {...common}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" /></svg>
+    )
+    case 'draft': return (
+      <svg {...common}><path d="M12 2v6" /><circle cx="12" cy="14" r="8" /><path d="m9 14 2 2 4-4" /></svg>
+    )
+    default: return null
+  }
+}
+
+// ============================================================
 // LOGIN
 // ============================================================
 function LoginScreen({ onLogin }) {
@@ -1951,20 +2086,23 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
       {(active || preDraft || drafting) && (
         <nav className="bottom-nav">
           {(drafting || league.status === 'locked') ? (
-            <>
-              <button className={`bn-item ${tab === 'draft' ? 'on' : ''}`}
-                onClick={() => setTab('draft')}>{drafting ? '🏈 Draft' : '📋 Draft'}</button>
-              <button className={`bn-item ${tab === 'home' ? 'on' : ''}`}
-                onClick={() => setTab('home')}>League</button>
-              <button className={`bn-item ${tab === 'feed' ? 'on' : ''}`}
-                onClick={() => setTab('feed')}>Feed</button>
-            </>
+            [['draft', 'Draft', 'draft'], ['home', 'League', 'league'], ['feed', 'Feed', 'feed']]
+              .map(([key, label, icon]) => (
+                <button key={key} className={`bn-item ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>
+                  <NavIcon name={icon} />
+                  <span>{label}</span>
+                </button>
+              ))
           ) : [
-            ['home', 'League'], ['team', 'Team'], ['scores', 'Matchup'],
-            ['players', 'Players'], ['feed', 'Feed'],
-          ].map(([key, label]) => (
+            ['home', 'League', 'league'], ['team', 'Team', 'team'], ['scores', 'Matchup', 'matchup'],
+            ['players', 'Players', 'players'], ['feed', 'Feed', 'feed'],
+          ].map(([key, label, icon]) => (
             <button key={key} className={`bn-item ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>
-              {label}{key === 'team' && pendingTrades > 0 && <span className="nav-badge">{pendingTrades}</span>}
+              <span className="bn-ico">
+                <NavIcon name={icon} />
+                {key === 'team' && pendingTrades > 0 && <span className="nav-badge">{pendingTrades}</span>}
+              </span>
+              <span>{label}</span>
             </button>
           ))}
         </nav>
