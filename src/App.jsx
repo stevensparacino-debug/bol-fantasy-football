@@ -1815,10 +1815,10 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   const drafting = league.status === 'drafting'
   const active = league.status === 'active'
   const preDraft = league.status === 'setup' || league.status === 'locked'
-  const [draftSubview, setDraftSubview] = useState('league') // 'draft' | 'league' | 'feed'
+  // The draft room is just another tab value ('draft') so tab clicks always win
   useEffect(() => {
-    if (league.status === 'drafting') setDraftSubview('draft')
-    else if (league.status === 'locked') setDraftSubview('league')
+    if (league.status === 'drafting') setTab('draft')
+    else if (league.status === 'locked') setTab('home')
   }, [league.status])
 
   return (
@@ -1838,8 +1838,8 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           <button className={`tab ${tab === 'standings' ? 'on' : ''}`} onClick={() => setTab('standings')}>Standings</button>
           <button className={`tab ${tab === 'feed' ? 'on' : ''}`} onClick={() => setTab('feed')}>Feed</button>
           {(drafting || league.status === 'locked') && (
-            <button className={`tab ${draftSubview === 'draft' ? 'on' : ''}`}
-              onClick={() => setDraftSubview('draft')}>
+            <button className={`tab ${tab === 'draft' ? 'on' : ''}`}
+              onClick={() => setTab('draft')}>
               🏈 Draft room
             </button>
           )}
@@ -1850,12 +1850,12 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         <nav className="bottom-nav">
           {(drafting || league.status === 'locked') ? (
             <>
-              <button className={`bn-item ${draftSubview==='draft'?'on':''}`}
-                onClick={() => setDraftSubview('draft')}>{drafting ? '🏈 Draft' : '📋 Draft'}</button>
-              <button className={`bn-item ${draftSubview==='league'?'on':''}`}
-                onClick={() => setDraftSubview('league')}>League</button>
-              <button className={`bn-item ${draftSubview==='feed'?'on':''}`}
-                onClick={() => setDraftSubview('feed')}>Feed</button>
+              <button className={`bn-item ${tab === 'draft' ? 'on' : ''}`}
+                onClick={() => setTab('draft')}>{drafting ? '🏈 Draft' : '📋 Draft'}</button>
+              <button className={`bn-item ${tab === 'home' ? 'on' : ''}`}
+                onClick={() => setTab('home')}>League</button>
+              <button className={`bn-item ${tab === 'feed' ? 'on' : ''}`}
+                onClick={() => setTab('feed')}>Feed</button>
             </>
           ) : [
             ['home', 'League'], ['team', 'Team'], ['scores', 'Matchup'],
@@ -1868,8 +1868,8 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         </nav>
       )}
 
-      {(drafting || league.status === 'locked') && draftSubview !== 'draft' && (
-        <div className="draft-peek-banner" onClick={() => setDraftSubview('draft')}>
+      {(drafting || league.status === 'locked') && tab !== 'draft' && (
+        <div className="draft-peek-banner" onClick={() => setTab('draft')}>
           <span>{drafting ? '🏈 DRAFT IN PROGRESS — tap to return' : '📋 DRAFT ROOM IS OPEN — tap to build your queue'}</span>
           {(() => {
             const onId = league.draft_order?.[
@@ -1880,16 +1880,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           })()}
         </div>
       )}
-      {(drafting || league.status === 'locked') && draftSubview === 'feed' && (
-        <FeedScreen league={league} teams={teams} myTeamId={resolvedTeamId} session={session} />
-      )}
-      {(drafting || league.status === 'locked') && draftSubview === 'league' && (
-        <LeagueHome league={league} teams={teams} myTeamId={resolvedTeamId}
-          isLeagueAdmin={isLeagueAdmin} isMock={isMock} session={session}
-          onEnterMock={onEnterMock} onExitMock={onExitMock} reloadTop={reloadTop}
-          setTab={v => { setTab(v); setDraftSubview('draft') }} />
-      )}
-      {(drafting || league.status === 'locked') && draftSubview === 'draft' ? (
+      {(drafting || league.status === 'locked') && tab === 'draft' ? (
         <DraftRoom
           session={session}
           league={league}
@@ -1922,9 +1913,9 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
         />
       ) : active && tab === 'standings' ? (
         <Standings league={league} teams={teams} myTeamId={resolvedTeamId} isLeagueAdmin={isLeagueAdmin} />
-      ) : (active || preDraft) && tab === 'feed' ? (
+      ) : (active || preDraft || drafting) && tab === 'feed' ? (
         <FeedScreen league={league} teams={teams} myTeamId={resolvedTeamId} session={session} />
-      ) : preDraft && tab !== 'home' ? (
+      ) : (preDraft || drafting) && tab !== 'home' ? (
         <ComingSoon tab={tab} league={league} onHome={() => setTab('home')} />
       ) : (
         <LeagueHome
