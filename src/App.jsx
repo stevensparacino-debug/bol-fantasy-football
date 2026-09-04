@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.33' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.34' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -654,6 +654,38 @@ select.input { appearance: none; }
 }
 
 .mu-row.viewing { border-color: var(--cyan); }
+
+/* ---------- lineup swap picker ---------- */
+.swap-cue {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+  color: var(--faint); min-width: 34px; text-align: right;
+}
+.swap-panel {
+  border: 1px solid var(--orange); border-top: none;
+  border-radius: 0 0 8px 8px; background: var(--surface);
+  padding: 10px 12px; margin: -6px 0 8px;
+}
+.swap-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--orange); margin-bottom: 8px;
+}
+.swap-opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; margin-bottom: 5px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--card);
+  font-size: 13px;
+}
+.swap-opt:last-child { margin-bottom: 0; }
+.swap-opt:hover { border-color: var(--orange); }
+.swap-slot {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 11px;
+  color: var(--cyan); min-width: 38px;
+}
+.swap-name { flex: 1; font-weight: 700; min-width: 0; }
+.swap-go {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em; color: var(--orange);
+}
 
 /* ---------- draft grades ---------- */
 .dg-row {
@@ -4541,7 +4573,10 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
   const [faProj, setFaProj] = useState({})
   const reload = useCallback(async () => {
     const all = await loadAllPlayers()
-    setPlayers(all.filter(p => p.nfl_team != null || p.adp != null))
+    // A real free agent is on an NFL roster today. Players with no team are
+    // retired, cut, or unsigned — they were showing up as draftable ghosts.
+    setPlayers(all.filter(p =>
+      (p.nfl_team != null || p.position === 'DEF') && p.status !== 'inactive'))
     try {
       const res = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
       if (res.ok) {
@@ -5247,7 +5282,7 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
   const [completed, setCompleted] = useState([])
   const [moves, setMoves] = useState(0)
   const [view, setView] = useState('starters') // starters | bench | season
-  const [selectedId, setSelectedId] = useState(null)
+  const [swapFor, setSwapFor] = useState(null) // slot key whose picker is open
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -5349,79 +5384,138 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
   }, [teams, completed, myTeamId])
   const ord = n => n === 1 ? '1ST' : n === 2 ? '2ND' : n === 3 ? '3RD' : `${n}TH`
 
-  const handleTap = async (target) => {
+  // Swap flow: tap a row to open a picker of legal replacements, tap one to swap.
+  const doSwap = async (a, b) => {
     if (!canEdit || busy) return
-    setMsg(null)
-    if (!selectedId) { if (target.row) setSelectedId(target.row.id); return }
-    const a = roster.find(r => r.id === selectedId)
-    if (!a) { setSelectedId(null); return }
-    if (target.row && target.row.id === a.id) { setSelectedId(null); return }
-    const pa = playersById[a.player_id]
-    setBusy(true)
+    setBusy(true); setMsg(null)
     try {
-      if (target.emptySlot) {
-        if (!slotAccepts(pa?.position, target.emptySlot)) {
-          setMsg({ t: 'err', v: `${pa?.name || 'That player'} can't go in ${target.emptySlot}.` })
-        } else {
-          const { error } = await supabase.from('rosters').update({ slot: target.emptySlot }).eq('id', a.id)
-          if (error) throw error
-          await loadRoster()
-        }
-      } else {
-        const b = target.row
-        const pb = playersById[b.player_id]
-        if (!slotAccepts(pa?.position, b.slot) || !slotAccepts(pb?.position, a.slot)) {
-          setMsg({ t: 'err', v: `That swap isn't position-legal (${pa?.position} ↔ ${pb?.position}).` })
-        } else {
-          const core = r => ({ league_id: r.league_id, team_id: r.team_id, player_id: r.player_id, week: r.week })
-          const { error: delErr } = await supabase.from('rosters').delete().in('id', [a.id, b.id])
-          if (delErr) throw delErr
-          const { error: insErr } = await supabase.from('rosters').insert([
-            { ...core(a), slot: b.slot }, { ...core(b), slot: a.slot },
-          ])
-          if (insErr) {
-            await supabase.from('rosters').insert([
-              { ...core(a), slot: a.slot }, { ...core(b), slot: b.slot },
-            ])
-            throw insErr
-          }
-          await loadRoster()
-        }
+      const core = r => ({ league_id: r.league_id, team_id: r.team_id, player_id: r.player_id, week: r.week })
+      const { error: delErr } = await supabase.from('rosters').delete().in('id', [a.id, b.id])
+      if (delErr) throw delErr
+      const { error: insErr } = await supabase.from('rosters').insert([
+        { ...core(a), slot: b.slot }, { ...core(b), slot: a.slot },
+      ])
+      if (insErr) {
+        await supabase.from('rosters').insert([
+          { ...core(a), slot: a.slot }, { ...core(b), slot: b.slot },
+        ])
+        throw insErr
       }
+      await loadRoster()
     } catch (err) {
       setMsg({ t: 'err', v: `Move failed: ${err.message}` })
       await loadRoster()
     }
-    setSelectedId(null)
+    setSwapFor(null)
     setBusy(false)
+  }
+
+  const moveToSlot = async (row, slot) => {
+    if (!canEdit || busy) return
+    setBusy(true); setMsg(null)
+    try {
+      const { error } = await supabase.from('rosters').update({ slot }).eq('id', row.id)
+      if (error) throw error
+      await loadRoster()
+    } catch (err) {
+      setMsg({ t: 'err', v: `Move failed: ${err.message}` })
+      await loadRoster()
+    }
+    setSwapFor(null)
+    setBusy(false)
+  }
+
+  // Who can legally take this row's place (and take on this row's slot)?
+  const candidatesFor = (row) => {
+    const p = playersById[row.player_id]
+    if (!p) return []
+    return roster
+      .filter(r => {
+        if (r.id === row.id) return false
+        const rp = playersById[r.player_id]
+        if (!rp) return false
+        return slotAccepts(rp.position, row.slot) && slotAccepts(p.position, r.slot)
+      })
+      .sort((a, b) => {
+        // bench options first, then by projection
+        const aBench = a.slot.startsWith('BN') ? 0 : 1
+        const bBench = b.slot.startsWith('BN') ? 0 : 1
+        if (aBench !== bBench) return aBench - bBench
+        return (proj[b.player_id] || 0) - (proj[a.player_id] || 0)
+      })
+  }
+
+  const candidatesForEmpty = (slot) =>
+    roster.filter(r => {
+      const rp = playersById[r.player_id]
+      return rp && slotAccepts(rp.position, slot)
+    }).sort((a, b) => (proj[b.player_id] || 0) - (proj[a.player_id] || 0))
+
+  const renderPicker = (row, slot) => {
+    const list = row ? candidatesFor(row) : candidatesForEmpty(slot)
+    return (
+      <div className="swap-panel">
+        <div className="swap-head">
+          <span>{row ? `Replace ${playersById[row.player_id]?.name || row.slot} with…` : `Move a player into ${slot}…`}</span>
+          <button className="btn btn-xs btn-ghost" onClick={() => setSwapFor(null)}>Cancel</button>
+        </div>
+        {list.length === 0 && (
+          <p className="sub" style={{ marginBottom: 0, fontSize: 12 }}>
+            No legal options — position rules don't allow a swap here.
+          </p>
+        )}
+        {list.map(r => {
+          const p = playersById[r.player_id]
+          const better = row && (proj[r.player_id] || 0) > (proj[row.player_id] || 0)
+          return (
+            <div key={r.id} className="swap-opt" onClick={() => row ? doSwap(row, r) : moveToSlot(r, slot)}>
+              <span className="swap-slot">{r.slot}</span>
+              <span className="swap-name">
+                {p?.name}
+                {injuryTag(p) && <span className={`inj-tag ${['OUT','IR'].includes(injuryTag(p)) ? 'bad' : ''}`}>{injuryTag(p)}</span>}
+                <span className="lmeta" style={{ display: 'block' }}>{p?.position} · {p?.nfl_team || 'FA'}</span>
+              </span>
+              <span className={`tp-col ${better ? 'tp-pts' : ''}`}>
+                {proj[r.player_id] != null ? proj[r.player_id].toFixed(1) : '—'}
+              </span>
+              <span className="swap-go">SWAP</span>
+            </div>
+          )
+        })}
+      </div>
+    )
   }
 
   const renderRow = (slot) => {
     const row = rowBySlot[slot]
     const p = row ? playersById[row.player_id] : null
-    const isSel = row && row.id === selectedId
+    const isOpen = swapFor === slot
     return (
-      <div key={slot}
-        className={`lineup-row ${p ? `pos-${p.position}` : ''} ${isSel ? 'sel' : ''} ${!row ? 'open' : ''} ${canEdit ? 'tappable' : ''}`}
-        onClick={() => row ? handleTap({ row }) : handleTap({ emptySlot: slot })}>
-        <span className="lslot">{slot}</span>
-        {p ? (
-          <>
-            <span className="lname">
-              {p.name}{injuryTag(p) && <span className={`inj-tag ${injuryTag(p) === 'OUT' || injuryTag(p) === 'IR' ? 'bad' : ''}`}>{injuryTag(p)}</span>}
-              <span className="lmeta" style={{ display: 'block' }}>
-                {p.position} · {p.nfl_team || 'FA'}
-                {statLine(stats[p.id], p.position) ? ` · ${statLine(stats[p.id], p.position)}` : ''}
-                {injuryTag(p) === 'OUT' && ' · swap recommended'}
+      <div key={slot}>
+        <div
+          className={`lineup-row ${p ? `pos-${p.position}` : ''} ${isOpen ? 'sel' : ''} ${!row ? 'open' : ''} ${canEdit ? 'tappable' : ''}`}
+          onClick={() => canEdit && setSwapFor(isOpen ? null : slot)}>
+          <span className="lslot">{slot}</span>
+          {p ? (
+            <>
+              <span className="lname">
+                {p.name}{injuryTag(p) && <span className={`inj-tag ${['OUT','IR'].includes(injuryTag(p)) ? 'bad' : ''}`}>{injuryTag(p)}</span>}
+                <span className="lmeta" style={{ display: 'block' }}>
+                  {p.position} · {p.nfl_team || 'FA'}
+                  {statLine(stats[p.id], p.position) ? ` · ${statLine(stats[p.id], p.position)}` : ''}
+                  {injuryTag(p) === 'OUT' && ' · swap recommended'}
+                </span>
               </span>
-            </span>
-            <span className="tp-col">{proj[p.id] != null ? proj[p.id].toFixed(1) : '—'}</span>
-            <span className="tp-col">{p.last_season_avg != null ? p.last_season_avg.toFixed(1) : '—'}</span>
-            <span className="tp-col tp-pts">{stats[p.id] ? livePts(p.id).toFixed(1) : '—'}</span>
-          </>
-        ) : (
-          <span className="lmeta">Empty — tap a player, then tap here</span>
-        )}
+              <span className="tp-col">{proj[p.id] != null ? proj[p.id].toFixed(1) : '—'}</span>
+              <span className="tp-col">{p.last_season_avg != null ? p.last_season_avg.toFixed(1) : '—'}</span>
+              <span className="tp-col tp-pts">{stats[p.id] ? livePts(p.id).toFixed(1) : '—'}</span>
+              {canEdit && <span className="swap-cue">{isOpen ? '▴' : 'SWAP'}</span>}
+            </>
+          ) : (
+            <span className="lmeta">Empty — tap to fill this slot</span>
+          )}
+        </div>
+        {isOpen && canEdit && renderPicker(row, slot)}
       </div>
     )
   }
@@ -5547,7 +5641,7 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
 
         {canEdit && view !== 'season' && (
           <p className="sub" style={{ marginTop: 12 }}>
-            Tap a player, then tap another player (or an empty slot) to swap — selection carries across the Starters/Bench tabs. Position rules apply.
+            Tap any player to see who can replace them, then tap the replacement. Only position-legal options are shown.
           </p>
         )}
         {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
