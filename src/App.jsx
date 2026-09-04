@@ -1693,6 +1693,24 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
       for (let i = 0; i < rows.length; i += 200) {
         await supabase.from('rosters').insert(rows.slice(i, i + 200))
       }
+
+      // Auto-generate the season schedule so week 1 matchups exist without
+      // the commissioner having to remember a button after draft night.
+      const { count: muCount } = await supabase
+        .from('matchups').select('id', { count: 'exact', head: true })
+        .eq('league_id', league.id)
+      if ((muCount || 0) === 0 && teams.length >= 2) {
+        const schedule = roundRobin(teams.map(t => t.id), 13)
+        const muRows = []
+        schedule.forEach(({ week, pairs }) => {
+          pairs.forEach(([home, away]) => {
+            muRows.push({ league_id: league.id, week, home_team_id: home, away_team_id: away })
+          })
+        })
+        for (let i = 0; i < muRows.length; i += 200) {
+          await supabase.from('matchups').insert(muRows.slice(i, i + 200))
+        }
+      }
     })()
   }, [league?.status, league?.id, teams.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
