@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.13' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.29' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -5124,16 +5124,7 @@ function DashboardHero({ league, teams, myTeamId, onFix, onStandings }) {
   const ord = n => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`
 
   const my = matchups.find(m => m.home_team_id === myTeamId || m.away_team_id === myTeamId)
-  if (!my) return null
-  const oppId = my.home_team_id === myTeamId ? my.away_team_id : my.home_team_id
-  const myScore = my.completed ? (my.home_team_id === myTeamId ? my.home_score : my.away_score) : teamScore(myTeamId)
-  const oppScore = my.completed ? (my.home_team_id === myTeamId ? my.away_score : my.home_score) : teamScore(oppId)
-  const myProj = teamProj(myTeamId), oppProj = teamProj(oppId)
-  const diff = (myScore + Math.max(myProj - myScore, 0)) - (oppScore + Math.max(oppProj - oppScore, 0))
-  const winPct = Math.min(99, Math.max(1, Math.round(100 / (1 + Math.pow(10, -diff / 25)))))
-  const myRec = records[myTeamId] || { w: 0, l: 0 }
-  const oppRec = records[oppId] || { w: 0, l: 0 }
-
+  // NOTE: all hooks must run every render — keep them above the early return.
   // Lineup alert: bench player projected meaningfully above a starter he could replace
   const alert = useMemo(() => {
     const myStarters = starters.filter(r => r.team_id === myTeamId)
@@ -5151,6 +5142,18 @@ function DashboardHero({ league, teams, myTeamId, onFix, onStandings }) {
     }
     return null
   }, [bench, starters, playersById, proj, myTeamId])
+
+  if (!my) return null
+  const oppId = my.home_team_id === myTeamId ? my.away_team_id : my.home_team_id
+  const myScore = my.completed ? (my.home_team_id === myTeamId ? my.home_score : my.away_score) : teamScore(myTeamId)
+  const oppScore = my.completed ? (my.home_team_id === myTeamId ? my.away_score : my.home_score) : teamScore(oppId)
+  const myProj = teamProj(myTeamId), oppProj = teamProj(oppId)
+  const diff = (myScore + Math.max(myProj - myScore, 0)) - (oppScore + Math.max(oppProj - oppScore, 0))
+  const winPct = Math.min(99, Math.max(1, Math.round(100 / (1 + Math.pow(10, -diff / 25)))))
+  const myRec = records[myTeamId] || { w: 0, l: 0 }
+  const oppRec = records[oppId] || { w: 0, l: 0 }
+
+
 
   return (
     <div className="card hero-card">
