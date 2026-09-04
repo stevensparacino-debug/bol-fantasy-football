@@ -16,7 +16,7 @@ const FANTASY_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
 const ROSTER_SLOTS = ['QB', 'RB1', 'RB2', 'WR1', 'WR2', 'TE', 'FLEX', 'K', 'DEF']
 const BENCH_SLOTS = ['BN1', 'BN2', 'BN3', 'BN4', 'BN5', 'BN6', 'BN7']
 const TOTAL_ROUNDS = 16 // 9 starters + 7 bench
-const DRAFT_PICK_TIMER = 90 // seconds
+const DRAFT_PICK_TIMER = 60 // seconds
 const BOT_PICK_DELAY_MS = 1500
 
 // League scoring — HALF PPR (0.5 per reception). Used by the Phase 4 engine
@@ -2300,7 +2300,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
           league_id: lg.id,
           user_id: crypto.randomUUID(),
           user_name: i === 0 ? 'Claude AI' : `Bot ${String(i + 2).padStart(2, '0')}`,
-          team_name: i === 0 ? 'The Algorithm' : bn,
+          team_name: i === 0 ? 'The Skynet Sharks' : bn,
           is_ai_team: i === 0, // first bot slot = AI team for testing
         })
       })
@@ -3185,7 +3185,7 @@ ${pool}
               </div>
               <span className="dr-clock-sub">
                 {onClockIsAI ? (aiThinking ? 'Claude is thinking…' : 'Claude picks in a moment')
-                  : `left of 1:${String(DRAFT_PICK_TIMER % 60).padStart(2, '0')} · auto-pick if time expires`}
+                  : `left of ${Math.floor(DRAFT_PICK_TIMER / 60)}:${String(DRAFT_PICK_TIMER % 60).padStart(2, '0')} · auto-pick if time expires`}
               </span>
               <div className="dr-progress">
                 <div className={secondsLeft != null && secondsLeft <= 10 ? 'warn' : ''}
@@ -5705,7 +5705,7 @@ function DraftCountdown({ league, teams }) {
           </div>
           <p className="dt-sub" style={{ marginTop: 10 }}>
             {new Date(at).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-            {' '}· Snake · 16 rounds · 90s clock · Half-PPR
+            {' '}· Snake · {TOTAL_ROUNDS} rounds · {DRAFT_PICK_TIMER}s clock · Half-PPR
           </p>
           {league.calendar_event_url ? (
             <button className="btn btn-xs btn-primary" style={{ marginTop: 10 }}
@@ -5720,7 +5720,7 @@ function DraftCountdown({ league, teams }) {
             const url = 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
               `&text=${encodeURIComponent(`${league.name || 'BOL Fantasy Football'} — Draft Night 🏈`)}` +
               `&dates=${fmt(start)}/${fmt(end)}` +
-              `&details=${encodeURIComponent(`Snake draft, 16 rounds, 90-second clock. Be there: ${APP_URL}`)}`
+              `&details=${encodeURIComponent(`Snake draft, ${TOTAL_ROUNDS} rounds, ${DRAFT_PICK_TIMER}-second clock. Be there: ${APP_URL}`)}`
             window.open(url, '_blank', 'noopener')
           }}>
             📅 Add to Google Calendar
@@ -5782,7 +5782,7 @@ function PreDraftCoach({ league, teams, myTeamId }) {
     return `PRE-DRAFT MODE — no live pick is happening. This is draft-prep talk.\n` +
       `The league draft ${at ? `is ${days === 0 ? 'TODAY' : `in ${days} day${days === 1 ? '' : 's'}`} (${at.toLocaleDateString()})` : 'date is not set yet'}.\n` +
       `${teams.length} of ${MAX_TEAMS} teams have joined. The manager's team: ${myTeam?.team_name || 'unnamed'}.\n` +
-      `Format: 12-team snake, 16 rounds, 90-second clock, half-PPR.\n\n` +
+      `Format: ${MAX_TEAMS}-team snake, ${TOTAL_ROUNDS} rounds, ${DRAFT_PICK_TIMER}-second clock, half-PPR.\n\n` +
       `TOP OF THE 2026 DRAFT BOARD (by rank, with 2025 avg points/game):\n${board}\n\n` +
       `The manager wants draft strategy, rankings talk, or hype for draft day. Keep it fun and grounded in the board above.`
   }
@@ -5813,7 +5813,7 @@ function RulesCard() {
       {open && (
         <>
           <p className="sub" style={{ marginTop: 10 }}>
-            12 teams · Snake draft, 16 rounds, 90-second clock · Lineup: QB, RB×2, WR×2, TE, FLEX (RB/WR/TE), K, DEF + 7 bench ·
+            {MAX_TEAMS} teams · Snake draft, {TOTAL_ROUNDS} rounds, {DRAFT_PICK_TIMER}-second clock · Lineup: QB, RB×2, WR×2, TE, FLEX (RB/WR/TE), K, DEF + 7 bench ·
             Free agency: first come, first served · Trades: even swaps up to 3-for-3, executed on acceptance ·
             Playoffs: top 6, weeks 14–16, seeds 1–2 get byes · Tiebreaker: points for.
           </p>
