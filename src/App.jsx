@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.31' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.33' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -1673,6 +1673,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
   const [teams, setTeams] = useState([])
   const [tab, setTab] = useState('home')
   const finalizedRef = useRef(false)
+  const scheduledRef = useRef(false)
 
   // Self-healing roster finalizer: whenever the admin loads an ACTIVE league
   // whose week-1 rosters are missing, rebuild them from the draft picks.
@@ -1716,6 +1717,13 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
 
       // Auto-generate the season schedule so week 1 matchups exist without
       // the commissioner having to remember a button after draft night.
+      // Only build the schedule once the FULL team list is loaded. Without this
+      // the effect can fire mid-load and generate a schedule for a subset of
+      // teams — which is how a league ends up with several partial schedules.
+      const expectedTeams = (league.draft_order || []).length
+      if (scheduledRef.current) return
+      if (expectedTeams === 0 || teams.length !== expectedTeams) return
+      scheduledRef.current = true
       const { count: muCount } = await supabase
         .from('matchups').select('id', { count: 'exact', head: true })
         .eq('league_id', league.id)
@@ -2450,7 +2458,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
         .from('matchups').select('id', { count: 'exact', head: true })
         .eq('league_id', league.id)
       if ((count || 0) > 0) {
-        setScheduleMsg({ t: 'err', v: 'Schedule already exists. Delete matchups in Supabase to regenerate.' })
+        setScheduleMsg({ t: 'err', v: `Schedule already exists (${count} matchups) — nothing generated.` })
       } else {
         const schedule = roundRobin(teams.map(t => t.id), 13)
         const rows = []
