@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/icon/app-icon.svg'
-const BUILD = 'v9.42' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.44' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -49,7 +49,7 @@ const slotAccepts = (position, slot) =>
 // machine with a chip on its shoulder and good-natured trash talk.
 // Web push: paste the PUBLIC half of your VAPID key pair here.
 // (Generate with: npx web-push generate-vapid-keys)
-const VAPID_PUBLIC_KEY = 'BL4qyMA48zMbUiqK-uWTIfHfBqMaZs-SL4dsXwaFAQeqQfXD3z-3ROGIaQVHQ0at9GkGlWhxlXzoi5cppAxqfT0'
+const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_VAPID_PUBLIC_KEY'
 const SW_PATH = '/bol-fantasy-football/sw.js'
 
 const AI_GM_PERSONA = [
@@ -563,27 +563,28 @@ select.input { appearance: none; }
 .bottom-nav {
   display: none;
   position: fixed; z-index: 40;
-  left: max(12px, env(safe-area-inset-left));
-  right: max(12px, env(safe-area-inset-right));
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  padding: 5px 6px;
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  padding: 7px 8px;
   background: var(--glass);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   backdrop-filter: blur(22px) saturate(180%);
   border: 1px solid var(--glass-border);
-  border-radius: 22px;
+  border-radius: 26px;
   box-shadow: var(--glass-shadow);
 }
 .bn-item {
   flex: 1; background: transparent; border: none; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   font-family: 'Archivo Narrow', sans-serif; font-weight: 700; text-transform: uppercase;
-  font-size: 10px; letter-spacing: 0.06em; color: var(--faint);
-  padding: 9px 2px 7px; border-radius: 8px; min-height: 58px;
+  font-size: 11px; letter-spacing: 0.05em; color: var(--faint);
+  padding: 11px 2px 9px; border-radius: 16px; min-height: 68px;
   -webkit-tap-highlight-color: transparent;
 }
 .bn-item svg { display: block; }
-.bn-item.on { color: var(--orange); background: rgba(248, 94, 50, 0.14); }
+.bn-item.on { color: var(--orange); background: rgba(248, 94, 50, 0.16); }
+.bn-item.on svg { transform: scale(1.06); }
 .bn-item:active { transform: scale(0.94); }
 .bn-item { transition: background 0.15s, color 0.15s, transform 0.12s; }
 .bn-ico { position: relative; display: inline-flex; }
@@ -593,8 +594,8 @@ select.input { appearance: none; }
 @media (max-width: 860px) {
   .bottom-nav { display: flex; }
   .top-tabs { display: none; }
-  .main { padding-bottom: 132px; }
-  .footer { padding-bottom: 92px; }
+  .main { padding-bottom: 148px; }
+  .footer { padding-bottom: 104px; }
 }
 .strip-link { cursor: pointer; }
 .strip-link:hover b { color: var(--orange); }
@@ -751,7 +752,7 @@ select.input { appearance: none; }
   padding-left: calc(20px + env(safe-area-inset-left));
   padding-right: calc(20px + env(safe-area-inset-right));
 }
-.drawer { padding-top: calc(16px + env(safe-area-inset-top)); }
+.drawer { padding-top: 0; }
 
 /* ---------- setup sheet ---------- */
 .setup-sheet {
@@ -857,23 +858,53 @@ select.input { appearance: none; }
   backdrop-filter: blur(24px) saturate(180%);
   border-left: 1px solid var(--glass-border);
   transform: translateX(100%); transition: transform 0.22s ease;
-  display: flex; flex-direction: column; padding: 16px;
+  display: flex; flex-direction: column; padding: 0;
 }
 .drawer.open { transform: translateX(0); }
-.drawer-head {
-  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
-  padding-bottom: 14px; margin-bottom: 10px; border-bottom: 1px solid var(--line);
+@media (max-width: 480px) { .drawer { width: min(310px, 88vw); } }
+/* Top bar sits clear of the notch/status bar in standalone mode */
+.drawer-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-shrink: 0;
+  padding: 14px 16px;
+  padding-top: calc(16px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--line);
 }
+.drawer-bar-title {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.12em; font-size: 13px; color: var(--muted);
+}
+.drawer-close {
+  background: transparent; border: 1px solid var(--line-strong); border-radius: 10px;
+  color: var(--text); font-size: 15px; line-height: 1; cursor: pointer;
+  width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.drawer-close:hover { border-color: var(--orange); color: var(--orange); }
+.drawer-scroll { flex: 1; overflow-y: auto; padding: 12px 10px; min-height: 0; }
+.drawer-who { padding: 4px 10px 14px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
 .drawer-name { font-weight: 700; font-size: 14px; }
 .drawer-mail { font-size: 11px; color: var(--faint); margin-top: 2px; word-break: break-all; }
+.drawer-label {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.14em; color: var(--faint); padding: 6px 10px 6px;
+}
 .drawer-item {
-  display: block; width: 100%; text-align: left;
-  background: transparent; border: none; border-radius: 8px; cursor: pointer;
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: transparent; border: none; border-radius: 10px; cursor: pointer;
   font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 14px; color: var(--text);
-  padding: 13px 10px;
+  padding: 13px 10px; min-height: 48px;
+  -webkit-tap-highlight-color: transparent;
 }
 .drawer-item:hover { background: var(--surface); color: var(--orange); }
-.drawer-item.danger { color: var(--red); margin-top: auto; }
+.drawer-item.nav svg { flex-shrink: 0; color: var(--muted); }
+.drawer-item.nav:hover svg { color: var(--orange); }
+.drawer-emoji { width: 19px; text-align: center; flex-shrink: 0; }
+.drawer-rule { border: none; border-top: 1px solid var(--line); margin: 12px 6px; }
+.drawer-item.danger {
+  color: var(--red); flex-shrink: 0; margin: 0 10px;
+  margin-bottom: calc(12px + env(safe-area-inset-bottom));
+}
 .drawer-item.danger:hover { background: rgba(255,90,90,0.10); color: var(--red); }
 @media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
 
@@ -1169,7 +1200,7 @@ select.input { appearance: none; }
   .dr-main { grid-template-columns: 1fr; margin-top: 12px; }
   .draft-col { display: none; }
   .draft-col.mshow { display: flex; flex-direction: column; }
-  .dr-cta { left: 12px; right: 12px; width: auto; bottom: calc(94px + env(safe-area-inset-bottom)); }
+  .dr-cta { left: 12px; right: 12px; width: auto; bottom: calc(108px + env(safe-area-inset-bottom)); }
   .dr-list { max-height: calc(100vh - 420px); min-height: 240px; }
   .dr-stat-sm { display: none; }
   .dr-qbtn { min-width: 62px; font-size: 10px; padding: 7px 8px; }
@@ -1272,7 +1303,7 @@ select.input { appearance: none; }
 }
 
 @media (max-width: 420px) {
-  .bn-item { font-size: 9px; letter-spacing: 0.02em; }
+  .bn-item { font-size: 10px; letter-spacing: 0.01em; padding: 10px 1px 8px; min-height: 64px; }
   .hero-score { font-size: 28px; }
   .tp-col { min-width: 34px; }
   .dg-stat { min-width: 46px; }
@@ -1663,6 +1694,13 @@ function App() {
   const [view, setView] = useState('home') // 'home' | 'mock'
   const [menuOpen, setMenuOpen] = useState(false)
   const [showSetup, setShowSetup] = useState(false)
+
+  // The drawer lives above LeagueView in the tree, so nav requests travel by
+  // a window event that LeagueView listens for. Keeps tab state where it is.
+  const goTo = (key) => {
+    window.dispatchEvent(new CustomEvent('bolff-nav', { detail: key }))
+    setMenuOpen(false)
+  }
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('bolff_theme') || 'dark' } catch { return 'dark' }
   })
@@ -1739,6 +1777,7 @@ function App() {
   if (loading) return <div className="app"><div className="main">Loading…</div></div>
 
   const isAdmin = session?.user?.email === ADMIN_EMAIL
+  const navLeague = view === 'mock' ? mockLeague : realLeague
 
   return (
     <div className="app">
@@ -1760,24 +1799,57 @@ function App() {
       {session && menuOpen && <div className="drawer-backdrop" onClick={() => setMenuOpen(false)} />}
       {session && (
         <aside className={`drawer ${menuOpen ? 'open' : ''}`} aria-hidden={!menuOpen}>
-          <div className="drawer-head">
-            <div>
+          <div className="drawer-bar">
+            <span className="drawer-bar-title">Menu</span>
+            <button className="drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close menu">✕</button>
+          </div>
+
+          <div className="drawer-scroll">
+            <div className="drawer-who">
               <div className="drawer-name">{session.user.user_metadata?.full_name || session.user.email}</div>
               <div className="drawer-mail">{session.user.email}</div>
             </div>
-            <button className="hamburger" onClick={() => setMenuOpen(false)} aria-label="Close menu">✕</button>
-          </div>
-          <button className="drawer-item" onClick={() => { setMenuOpen(false); setShowSetup(true) }}>
-            📲  Add to home screen &amp; alerts
-          </button>
-          <button className="drawer-item" onClick={toggleTheme}>
-            {theme === 'dark' ? '☀️  Light mode' : '🌙  Dark mode'}
-          </button>
-          {isAdmin && mockLeague && (
-            <button className="drawer-item" onClick={() => { setView(view === 'mock' ? 'home' : 'mock'); setMenuOpen(false) }}>
-              {view === 'mock' ? '←  Back to real league' : '🧪  Mock draft'}
+
+            {navLeague && (
+              <>
+                <p className="drawer-label">Go to</p>
+                {[
+                  ...(navLeague.status === 'drafting' || navLeague.status === 'locked'
+                    ? [['draft', 'Draft room', 'draft']] : []),
+                  ...(navLeague.status === 'active' ? [
+                    ['home', 'League', 'league'],
+                    ['team', 'My team', 'team'],
+                    ['scores', 'Matchup', 'matchup'],
+                    ['players', 'Free agents', 'players'],
+                    ['standings', 'Standings', 'league'],
+                    ['feed', 'Feed', 'feed'],
+                  ] : [['home', 'League', 'league'], ['feed', 'Feed', 'feed']]),
+                ].map(([key, label, icon]) => (
+                  <button key={key} className="drawer-item nav" onClick={() => goTo(key)}>
+                    <NavIcon name={icon} size={19} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+                <hr className="drawer-rule" />
+              </>
+            )}
+
+            <p className="drawer-label">Settings</p>
+            <button className="drawer-item" onClick={() => { setMenuOpen(false); setShowSetup(true) }}>
+              <span className="drawer-emoji">📲</span><span>Add to home screen &amp; alerts</span>
             </button>
-          )}
+            <button className="drawer-item" onClick={toggleTheme}>
+              <span className="drawer-emoji">{theme === 'dark' ? '☀️' : '🌙'}</span>
+              <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+            </button>
+            {isAdmin && mockLeague && (
+              <button className="drawer-item" onClick={() => { setView(view === 'mock' ? 'home' : 'mock'); setMenuOpen(false) }}>
+                <span className="drawer-emoji">{view === 'mock' ? '←' : '🧪'}</span>
+                <span>{view === 'mock' ? 'Back to real league' : 'Mock draft'}</span>
+              </button>
+            )}
+          </div>
+
           <button className="drawer-item danger" onClick={() => { setMenuOpen(false); handleLogout() }}>
             Sign out
           </button>
@@ -1837,9 +1909,9 @@ function App() {
 // ============================================================
 // NAV ICONS
 // ============================================================
-const NavIcon = ({ name }) => {
-  const common = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none',
-    stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
+const NavIcon = ({ name, size = 27 }) => {
+  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+    stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' }
   switch (name) {
     case 'league': return (
       <svg {...common}><path d="M6 3h12v5a6 6 0 0 1-12 0V3Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" />
@@ -2237,6 +2309,13 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
       .subscribe()
     return () => { mounted = false; supabase.removeChannel(channel) }
   }, [leagueId])
+
+  // Nav requests from the drawer (which sits above this component in the tree)
+  useEffect(() => {
+    const onNav = e => { if (e.detail) setTab(e.detail) }
+    window.addEventListener('bolff-nav', onNav)
+    return () => window.removeEventListener('bolff-nav', onNav)
+  }, [])
 
   // The draft room is just another tab value ('draft') so tab clicks always win.
   // NOTE: this hook must stay ABOVE the early return below — React requires the
