@@ -49,7 +49,7 @@ const slotAccepts = (position, slot) =>
 // machine with a chip on its shoulder and good-natured trash talk.
 // Web push: paste the PUBLIC half of your VAPID key pair here.
 // (Generate with: npx web-push generate-vapid-keys)
-const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_VAPID_PUBLIC_KEY'
+const VAPID_PUBLIC_KEY = 'BL4qyMA48zMbUiqK-uWTIfHfBqMaZs-SL4dsXwaFAQeqQfXD3z-3ROGIaQVHQ0at9GkGlWhxlXzoi5cppAxqfT0'
 const SW_PATH = '/bol-fantasy-football/sw.js'
 
 const AI_GM_PERSONA = [
