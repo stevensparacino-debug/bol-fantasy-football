@@ -6,20 +6,35 @@
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0E121A",
-  "theme_color": "#0E121A",
+  "theme_color": "#1E2433",
   "categories": ["sports"],
   "icons": [
     {
-      "src": "https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
+      "src": "/bol-fantasy-football/icon/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
     },
     {
-      "src": "https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png",
+      "src": "/bol-fantasy-football/icon/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/bol-fantasy-football/icon/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/bol-fantasy-football/icon/app-icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "maskable"
+    },
+    {
+      "src": "/bol-fantasy-football/icon/app-icon-maskable-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
