@@ -5,8 +5,8 @@ import { supabase } from './supabase'
 // CONSTANTS
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
-const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.40' // bump on every deploy — shown in footer so we always know what's live
+const LOGO_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/icon/app-icon.svg'
+const BUILD = 'v9.41' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -632,10 +632,11 @@ select.input { appearance: none; }
 .logo-wrap { display: flex; align-items: center; gap: 12px; }
 .logo-badge {
   display: inline-flex; align-items: center; justify-content: center;
-  background: #FFFFFF; border-radius: 6px; padding: 5px 9px;
+  background: transparent; border-radius: 8px; padding: 0; overflow: hidden;
 }
-.logo-img { height: 24px; display: block; }
-.login-logo { margin-bottom: 24px; padding: 8px 14px; }
+.logo-img { height: 32px; width: 32px; display: block; border-radius: 8px; }
+.login-logo { margin-bottom: 22px; padding: 0; }
+.login-logo .logo-img { height: 72px; width: 72px; border-radius: 18px; }
 
 /* ---------- v8: draft header + queue ---------- */
 .draft-header {
@@ -1831,7 +1832,7 @@ const NavIcon = ({ name }) => {
 function LoginScreen({ onLogin }) {
   return (
     <div className="login-hero">
-      <span className="logo-badge login-logo"><img className="logo-img" src={LOGO_URL} alt="BOL Agency" style={{ height: 40 }} /></span>
+      <span className="logo-badge login-logo"><img className="logo-img" src={LOGO_URL} alt="BOL Fantasy Football" /></span>
       <h1 className="display">BOL<br /><span className="accent">FANTASY</span><br />FOOTBALL</h1>
       <p>10 teams. Half-PPR scoring. One office champion. Sign in with Google to claim your spot.</p>
       <button className="btn btn-primary" onClick={onLogin}>Sign in with Google</button>
