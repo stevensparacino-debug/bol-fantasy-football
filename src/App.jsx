@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.39' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.40' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -49,7 +49,7 @@ const slotAccepts = (position, slot) =>
 // machine with a chip on its shoulder and good-natured trash talk.
 // Web push: paste the PUBLIC half of your VAPID key pair here.
 // (Generate with: npx web-push generate-vapid-keys)
-const VAPID_PUBLIC_KEY = 'BL4qyMA48zMbUiqK-uWTIfHfBqMaZs-SL4dsXwaFAQeqQfXD3z-3ROGIaQVHQ0at9GkGlWhxlXzoi5cppAxqfT0'
+const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_VAPID_PUBLIC_KEY'
 const SW_PATH = '/bol-fantasy-football/sw.js'
 
 const AI_GM_PERSONA = [
@@ -1293,6 +1293,18 @@ const urlBase64ToUint8Array = (base64String) => {
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
   const raw = window.atob(base64)
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)))
+}
+
+// Fire a push notification. Silent-fails by design: a missed notification
+// must never break the action that triggered it.
+async function sendPush({ title, body, url, tag, user_id, league_id }) {
+  try {
+    await supabase.functions.invoke('send-push', {
+      body: { title, body, url, tag, user_id, league_id },
+    })
+  } catch (e) {
+    console.warn('push failed (non-blocking):', e?.message)
+  }
 }
 
 function makeJoinCode() {
@@ -2749,6 +2761,14 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     const at = nextSunday1pmET()
     await supabase.from('leagues').update({ lineup_lock_at: at.toISOString() }).eq('id', league.id)
     setWeekMsg({ t: 'ok', v: `Lineups lock ${at.toLocaleString()} (your local time).` })
+    if (!isMock) {
+      sendPush({
+        league_id: league.id,
+        title: '⏰ Set your lineup',
+        body: `Week ${league.current_week || 1} lineups lock Sunday at 1:00 PM ET.`,
+        tag: 'lock',
+      })
+    }
   }
   const clearLock = async () => {
     await supabase.from('leagues').update({ lineup_lock_at: null }).eq('id', league.id)
@@ -2788,6 +2808,14 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
       await supabase.from('leagues')
         .update({ current_week: next, lineup_lock_at: null, stats_source: nextSource })
         .eq('id', league.id)
+      if (!isMock) {
+        sendPush({
+          league_id: league.id,
+          title: `🏈 Week ${next} is open`,
+          body: 'Lineups are unlocked and the waiver wire is live. Check your matchup.',
+          tag: 'week',
+        })
+      }
       setWeekMsg({
         t: 'ok',
         v: `Advanced to week ${next} — rosters carried over, lock cleared` +
@@ -4397,6 +4425,12 @@ function Scoreboard({ league, teams, myTeamId, isLeagueAdmin }) {
         .from('matchups').select('*')
         .eq('league_id', league.id).eq('week', week)
       setMatchups(mu || [])
+      sendPush({
+        league_id: league.id,
+        title: `📊 Week ${week} is final`,
+        body: 'Scores are locked in and the standings have moved.',
+        tag: 'final',
+      })
       setMsg({ t: 'ok', v: `Week ${week} finalized — standings updated.` })
     } catch (err) {
       setMsg({ t: 'err', v: `Finalize failed: ${err.message}` })
@@ -5164,6 +5198,18 @@ function TradesPanel({ league, teams, myTeamId }) {
             (note.trim() ? `\n\n"${note.trim()}"` : ''),
         })
       } catch { /* feed post is a nicety, never block the trade */ }
+      // Ping the other manager's devices
+      const targetTeam = teams.find(t => t.id === targetTeamId)
+      if (targetTeam?.user_id) {
+        sendPush({
+          user_id: targetTeam.user_id,
+          title: '🔁 New trade offer',
+          body: `${teamsById[myTeamId]?.team_name} wants ` +
+            `${getIds.map(pid => playersById[pid]?.name || '').filter(Boolean).join(', ')} ` +
+            `for ${giveIds.map(pid => playersById[pid]?.name || '').filter(Boolean).join(', ')}.`,
+          tag: 'trade',
+        })
+      }
     }
     setBusy(false)
     loadTrades()
@@ -5172,6 +5218,16 @@ function TradesPanel({ league, teams, myTeamId }) {
   const respond = async (trade, status) => {
     setBusy(true)
     await supabase.from('trades').update({ status }).eq('id', trade.id)
+    // Let the proposer know either way
+    const other = teams.find(t => t.id === (trade.from_team_id === myTeamId ? trade.to_team_id : trade.from_team_id))
+    if (other?.user_id && ['accepted', 'rejected'].includes(status)) {
+      sendPush({
+        user_id: other.user_id,
+        title: status === 'accepted' ? '✅ Trade accepted' : '❌ Trade rejected',
+        body: `${teamsById[myTeamId]?.team_name} ${status} your offer.`,
+        tag: 'trade',
+      })
+    }
     setBusy(false)
     loadTrades()
   }
@@ -6037,6 +6093,12 @@ function FeedScreen({ league, teams, myTeamId, session }) {
         user_name: 'Coach Sunday', team_name: `WEEK ${wk} RECAP`,
         body: data.text.slice(0, 500),
       })
+      sendPush({
+        league_id: league.id,
+        title: `📰 Week ${wk} recap`,
+        body: 'Coach Sunday just posted the weekly recap.',
+        tag: 'recap',
+      })
     } catch (e) {
       window.alert(`Recap failed: ${e.message}`)
     }
@@ -6474,6 +6536,12 @@ function DraftGrades({ league, teams, myTeamId, isLeagueAdmin, session }) {
         user_name: 'Coach Sunday', team_name: 'DRAFT RECAP',
         body: (data?.text || '').slice(0, 500),
       })
+      sendPush({
+        league_id: league.id,
+        title: '🏈 Coach graded the draft',
+        body: 'The draft recap is up in the feed. Brace yourself.',
+        tag: 'recap',
+      })
       setCoachMsg({ t: 'ok', v: 'Coach posted the draft recap to the Feed.' })
     } catch (e) {
       setCoachMsg({ t: 'err', v: `Coach is off the air: ${e.message}` })
@@ -6659,6 +6727,31 @@ function SetupSheet({ session, onClose }) {
               : !pushSupported ? 'Not supported on this browser'
               : 'Enable notifications'}
           </button>
+          {perm === 'granted' && (
+            <button className="btn btn-sm" style={{ width: '100%', marginTop: 8 }}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true); setMsg(null)
+                try {
+                  const { data, error } = await supabase.functions.invoke('send-push', {
+                    body: {
+                      title: '🏈 BOL Fantasy Football',
+                      body: 'Notifications are working. See you Sunday.',
+                      tag: 'test',
+                    },
+                  })
+                  if (error) throw error
+                  setMsg(data?.sent > 0
+                    ? { t: 'ok', v: `Test sent to ${data.sent} device${data.sent > 1 ? 's' : ''}.` }
+                    : { t: 'err', v: 'No devices found for your account yet.' })
+                } catch (e) {
+                  setMsg({ t: 'err', v: `Test failed: ${e.message}` })
+                }
+                setBusy(false)
+              }}>
+              Send a test notification
+            </button>
+          )}
           {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
         </div>
 
