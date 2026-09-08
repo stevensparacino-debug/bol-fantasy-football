@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://8835713.fs1.hubspotusercontent-na2.net/hubfs/8835713/BOL%20Branding/BOL%20Logos/BOL_Orange-Navy.png'
-const BUILD = 'v9.36' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.39' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -47,6 +47,11 @@ const slotAccepts = (position, slot) =>
 
 // The AI team's own voice — deliberately NOT Coach Sunday. Scrappy underdog
 // machine with a chip on its shoulder and good-natured trash talk.
+// Web push: paste the PUBLIC half of your VAPID key pair here.
+// (Generate with: npx web-push generate-vapid-keys)
+const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_VAPID_PUBLIC_KEY'
+const SW_PATH = '/bol-fantasy-football/sw.js'
+
 const AI_GM_PERSONA = [
   'VOICE INSTRUCTION — for this response, drop your usual broadcaster persona completely.',
   'You are NOT Coach Sunday here. You are the AI general manager of a fantasy team competing against a room of humans in an office league.',
@@ -87,6 +92,10 @@ const CSS = `
   --magenta-soft: #F2A9F2;
   --red-soft: #FFB1B1;
   --on-accent: #0E121A;
+  --glass: rgba(21, 26, 37, 0.72);
+  --glass-strong: rgba(14, 18, 26, 0.86);
+  --glass-border: rgba(231, 231, 233, 0.12);
+  --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.48);
   /* legacy aliases used by inline styles */
   --ink: #E7E7E9;
   --cream: #0E121A;
@@ -115,6 +124,10 @@ const CSS = `
   --magenta-soft: #8E1B8E;
   --red-soft: #B3261E;
   --on-accent: #FFFFFF;
+  --glass: rgba(255, 255, 255, 0.74);
+  --glass-strong: rgba(255, 255, 255, 0.90);
+  --glass-border: rgba(27, 33, 48, 0.12);
+  --glass-shadow: 0 10px 30px rgba(27, 33, 48, 0.16);
   --ink: #1B2130;
   --cream: #F5F6F8;
   --chalk: #FFFFFF;
@@ -136,8 +149,11 @@ body { font-family: 'Archivo', sans-serif; -webkit-font-smoothing: antialiased; 
 /* Header */
 .header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 24px; background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  padding: 14px 24px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--glass-border);
   position: sticky; top: 0; z-index: 20;
 }
 .header .logo { font-size: 22px; line-height: 1; letter-spacing: 0.08em; }
@@ -546,9 +562,17 @@ select.input { appearance: none; }
 /* ---------- Kit: bottom navigation (mobile) ---------- */
 .bottom-nav {
   display: none;
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-  background: var(--surface); border-top: 1px solid var(--line-strong);
-  padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
+  position: fixed; z-index: 40;
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  padding: 5px 6px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: 22px;
+  box-shadow: var(--glass-shadow);
 }
 .bn-item {
   flex: 1; background: transparent; border: none; cursor: pointer;
@@ -559,8 +583,9 @@ select.input { appearance: none; }
   -webkit-tap-highlight-color: transparent;
 }
 .bn-item svg { display: block; }
-.bn-item.on { color: var(--orange); }
-.bn-item:active { background: var(--raise); }
+.bn-item.on { color: var(--orange); background: rgba(248, 94, 50, 0.14); }
+.bn-item:active { transform: scale(0.94); }
+.bn-item { transition: background 0.15s, color 0.15s, transform 0.12s; }
 .bn-ico { position: relative; display: inline-flex; }
 .bn-ico .nav-badge {
   position: absolute; top: -5px; right: -9px; margin: 0;
@@ -568,8 +593,8 @@ select.input { appearance: none; }
 @media (max-width: 860px) {
   .bottom-nav { display: flex; }
   .top-tabs { display: none; }
-  .main { padding-bottom: 120px; }
-  .footer { padding-bottom: 80px; }
+  .main { padding-bottom: 132px; }
+  .footer { padding-bottom: 92px; }
 }
 .strip-link { cursor: pointer; }
 .strip-link:hover b { color: var(--orange); }
@@ -662,6 +687,86 @@ select.input { appearance: none; }
 }
 
 .mu-row.viewing { border-color: var(--cyan); }
+
+/* ---------- commissioner weekly checklist ---------- */
+.cw {
+  border: 1px solid var(--orange); border-radius: 10px;
+  background: var(--surface); padding: 16px; margin-bottom: 20px;
+}
+.cw-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.cw-title {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; font-size: 24px;
+}
+.cw-step {
+  display: flex; gap: 12px; padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.cw-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  font-weight: 700; font-size: 13px;
+  background: var(--raise); color: var(--muted);
+}
+.cw-step.done .cw-ico { background: var(--lime); color: var(--on-accent); }
+.cw-step.todo .cw-ico { background: var(--orange); color: var(--on-accent); }
+.cw-step.urgent .cw-ico { background: var(--red); color: #fff; }
+.cw-step.blocked { opacity: 0.55; }
+.cw-body { flex: 1; min-width: 0; }
+.cw-body b { font-size: 14px; }
+.cw-body p { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+.cw-hint { color: var(--orange) !important; font-weight: 600; }
+.cw-btn { margin-top: 8px; }
+.cw-foot {
+  font-size: 11px; color: var(--faint); margin-top: 12px;
+  padding-top: 12px; border-top: 1px solid var(--line); line-height: 1.5;
+}
+@media (max-width: 700px) {
+  .cw { padding: 14px 12px; }
+  .cw-btn { width: 100%; }
+  .cw-title { font-size: 20px; }
+}
+
+/* ---------- standalone / safe areas ---------- */
+.header {
+  padding-top: calc(14px + env(safe-area-inset-top));
+  padding-left: calc(24px + env(safe-area-inset-left));
+  padding-right: calc(24px + env(safe-area-inset-right));
+}
+.main {
+  padding-left: calc(20px + env(safe-area-inset-left));
+  padding-right: calc(20px + env(safe-area-inset-right));
+}
+.drawer { padding-top: calc(16px + env(safe-area-inset-top)); }
+
+/* ---------- setup sheet ---------- */
+.setup-sheet {
+  position: fixed; z-index: 62; left: 50%; transform: translateX(-50%);
+  bottom: 0; width: min(460px, 100%);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px 14px 0 0; padding: 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 -12px 40px rgba(0,0,0,0.5);
+}
+.setup-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.setup-block {
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; margin-bottom: 12px; background: var(--surface);
+}
+.setup-step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 15px; }
+.setup-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--raise); color: var(--text);
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 13px;
+}
+.setup-num.done { background: var(--lime); color: var(--on-accent); }
+.setup-list { margin: 0; padding-left: 20px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+.setup-list li { margin-bottom: 2px; }
 .nav-badge {
   display: inline-block; margin-left: 5px; min-width: 16px; padding: 1px 5px;
   background: var(--red); color: #fff; border-radius: 999px;
@@ -733,7 +838,10 @@ select.input { appearance: none; }
 }
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: 272px; z-index: 61;
-  background: var(--card); border-left: 1px solid var(--line-strong);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border-left: 1px solid var(--glass-border);
   transform: translateX(100%); transition: transform 0.22s ease;
   display: flex; flex-direction: column; padding: 16px;
 }
@@ -1011,7 +1119,10 @@ select.input { appearance: none; }
 .dr-cta {
   position: fixed; right: 20px; bottom: 20px; z-index: 30;
   width: 300px; max-width: calc(100vw - 40px);
-  background: var(--card); border: 1px solid var(--orange);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--orange);
   border-radius: 10px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.45);
@@ -1044,7 +1155,7 @@ select.input { appearance: none; }
   .dr-main { grid-template-columns: 1fr; margin-top: 12px; }
   .draft-col { display: none; }
   .draft-col.mshow { display: flex; flex-direction: column; }
-  .dr-cta { left: 12px; right: 12px; width: auto; bottom: 68px; }
+  .dr-cta { left: 12px; right: 12px; width: auto; bottom: calc(94px + env(safe-area-inset-bottom)); }
   .dr-list { max-height: calc(100vh - 420px); min-height: 240px; }
   .dr-stat-sm { display: none; }
   .dr-qbtn { min-width: 62px; font-size: 10px; padding: 7px 8px; }
@@ -1153,12 +1264,37 @@ select.input { appearance: none; }
   .dg-stat { min-width: 46px; }
 }
 
-@media (prefers-reduced-motion: reduce) { .btn, .tab, .chip { transition: none; } }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bottom-nav, .header, .drawer, .setup-sheet, .dr-cta { background: var(--surface); }
+}
+
+@media (prefers-reduced-motion: reduce) { .btn, .tab, .chip, .bn-item { transition: none; } }
 `
 
 // ============================================================
 // HELPERS
 // ============================================================
+// --- PWA / push helpers ---
+const isStandalone = () =>
+  window.matchMedia('(display-mode: standalone)').matches ||
+  window.navigator.standalone === true
+
+const detectPlatform = () => {
+  const ua = navigator.userAgent || ''
+  const iOS = /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  if (iOS) return 'ios'
+  if (/Android/.test(ua)) return 'android'
+  return 'desktop'
+}
+
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = window.atob(base64)
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)))
+}
+
 function makeJoinCode() {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
   let code = ''
@@ -1474,6 +1610,7 @@ function App() {
   const [mockLeague, setMockLeague] = useState(null)
   const [view, setView] = useState('home') // 'home' | 'mock'
   const [menuOpen, setMenuOpen] = useState(false)
+  const [showSetup, setShowSetup] = useState(false)
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('bolff_theme') || 'dark' } catch { return 'dark' }
   })
@@ -1483,6 +1620,13 @@ function App() {
     try { localStorage.setItem('bolff_theme', theme) } catch { /* ignore */ }
   }, [theme])
   const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'))
+
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register(SW_PATH).catch(err =>
+        console.warn('Service worker registration failed:', err))
+    }
+  }, [])
 
   useEffect(() => {
     const tag = document.createElement('style')
@@ -1558,6 +1702,9 @@ function App() {
         </header>
       )}
 
+      {session && showSetup && (
+        <SetupSheet session={session} onClose={() => setShowSetup(false)} />
+      )}
       {session && menuOpen && <div className="drawer-backdrop" onClick={() => setMenuOpen(false)} />}
       {session && (
         <aside className={`drawer ${menuOpen ? 'open' : ''}`} aria-hidden={!menuOpen}>
@@ -1568,6 +1715,9 @@ function App() {
             </div>
             <button className="hamburger" onClick={() => setMenuOpen(false)} aria-label="Close menu">✕</button>
           </div>
+          <button className="drawer-item" onClick={() => { setMenuOpen(false); setShowSetup(true) }}>
+            📲  Add to home screen &amp; alerts
+          </button>
           <button className="drawer-item" onClick={toggleTheme}>
             {theme === 'dark' ? '☀️  Light mode' : '🌙  Dark mode'}
           </button>
@@ -2302,6 +2452,7 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
           onEnterMock={onEnterMock}
           onExitMock={onExitMock}
           reloadTop={reloadTop}
+          setTab={setTab}
         />
       )}
     </>
@@ -2311,7 +2462,7 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
 // ============================================================
 // ADMIN PANEL
 // ============================================================
-function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, reloadTop }) {
+function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, reloadTop, setTab }) {
   const [seedMsg, setSeedMsg] = useState(null)
   const [seeding, setSeeding] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -2682,12 +2833,94 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     setWeekMsg({ t: 'ok', v: src === 'live' ? 'Stats source: LIVE (current season).' : `Stats source: 2025 week ${src.split(':')[1]} (mock).` })
   }
 
+  const setAiLineup = async () => {
+              setBusy(true)
+              try {
+                const aiTeam = teams.find(t => t.is_ai_team)
+                const week = league.current_week || 1
+                const { data: ro } = await supabase.from('rosters').select('*')
+                  .eq('league_id', league.id).eq('team_id', aiTeam.id).eq('week', week)
+                const ids = (ro || []).map(r => r.player_id)
+                const { data: ps } = await supabase.from('players').select('*').in('id', ids)
+                const pById = Object.fromEntries((ps || []).map(p => [p.id, p]))
+                // Fetch projections
+                const projRes = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
+                const projRaw = projRes.ok ? normalizeSleeperStats(await projRes.json()) : {}
+                const projPts = {}
+                Object.entries(projRaw).forEach(([pid, s]) => {
+                  const pts = s?.pts_half_ppr ?? s?.pts_std
+                  if (typeof pts === 'number') projPts[pid] = Math.round(pts * 10) / 10
+                })
+                const rosterStr = (ro || []).map(r => {
+                  const p = pById[r.player_id]
+                  return `${r.slot}: ${p?.name || r.player_id} (${p?.position} ${p?.nfl_team || 'FA'}) PROJ:${projPts[r.player_id] ?? '?'}`
+                }).join('\n')
+                const context =
+                  AI_GM_PERSONA + '\n\n' +
+                  `You are the AI GM for "${aiTeam.team_name}" in a ${MAX_TEAMS}-team half-PPR league, week ${week}.
+
+` +
+                  `CURRENT ROSTER (slot: player, proj pts):
+${rosterStr}
+
+` +
+                  `STARTING SLOTS: QB, RB1, RB2, WR1, WR2, TE, FLEX (RB/WR/TE only), K, DEF
+
+` +
+                  `Rules: each player can only start once, FLEX must be RB/WR/TE.
+` +
+                  `Respond ONLY with JSON, no markdown:
+` +
+                  `{"QB":"player_id","RB1":"player_id","RB2":"player_id","WR1":"player_id","WR2":"player_id","TE":"player_id","FLEX":"player_id","K":"player_id","DEF":"player_id","smack":"one short line of good-natured trash talk in your underdog voice"}`
+                const { data, error } = await supabase.functions.invoke('draft-guru', {
+                  body: { context, question: 'Set the optimal lineup for this week.' }
+                })
+                if (error) throw error
+                const text = data?.text || ''
+                const jsonMatch = text.match(/\{[^}]+\}/)
+                if (!jsonMatch) throw new Error('Claude did not return valid JSON')
+                const lineup = JSON.parse(jsonMatch[0])
+                // Apply lineup: update slot for each player
+                for (const [slot, pid] of Object.entries(lineup)) {
+                  if (!ROSTER_SLOTS.includes(slot)) continue
+                  const row = (ro || []).find(r => r.player_id === pid)
+                  if (!row) continue
+                  await supabase.from('rosters').update({ slot }).eq('id', row.id)
+                  // Move displaced player to bench
+                  const displaced = (ro || []).find(r => r.slot === slot && r.player_id !== pid)
+                  if (displaced) {
+                    const benchSlot = BENCH_SLOTS.find(bs => !(ro || []).some(r => r.slot === bs && r.player_id !== displaced.player_id))
+                    if (benchSlot) await supabase.from('rosters').update({ slot: benchSlot }).eq('id', displaced.id)
+                  }
+                }
+                await supabase.from('feed_posts').insert({
+                  league_id: league.id, user_id: aiTeam.user_id,
+                  user_name: aiTeam.team_name, team_name: 'AI LINEUP',
+                  body: (lineup.smack ? lineup.smack + '\n\n' : '') + `Week ${week} lineup: ` +
+                    Object.entries(lineup).filter(([s]) => ROSTER_SLOTS.includes(s))
+                      .map(([s, pid]) => `${s} ${pById[pid]?.name || pid}`).join(' · '),
+                })
+                window.alert('AI lineup set and posted to the feed.')
+              } catch (err) {
+                window.alert(`AI lineup failed: ${err.message}`)
+              }
+              setBusy(false)
+            }
+
   const canStart = league.draft_order && teams.length >= 2 &&
     (isMock || league.status === 'locked')
 
   return (
     <div className={`card ${isMock ? 'mock-card' : 'admin-card'}`}>
       <h2>{isMock ? 'Mock Draft Controls' : 'Commissioner Controls'}</h2>
+
+      {!isMock && league.status === 'active' && (
+        <CommishWeek
+          league={league} teams={teams} busy={busy} setTab={setTab}
+          onSetLock={setLockNextSunday} onClearLock={clearLock}
+          onAdvance={advanceWeek} onAiLineup={setAiLineup} onReseed={seedPlayers}
+        />
+      )}
 
       {!isMock && (
         <p className="sub">
@@ -2845,79 +3078,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
             Run after projections update (Wednesday/Thursday).
           </p>
           <div className="admin-actions">
-            <button className="btn btn-sm" disabled={busy} onClick={async () => {
-              setBusy(true)
-              try {
-                const aiTeam = teams.find(t => t.is_ai_team)
-                const week = league.current_week || 1
-                const { data: ro } = await supabase.from('rosters').select('*')
-                  .eq('league_id', league.id).eq('team_id', aiTeam.id).eq('week', week)
-                const ids = (ro || []).map(r => r.player_id)
-                const { data: ps } = await supabase.from('players').select('*').in('id', ids)
-                const pById = Object.fromEntries((ps || []).map(p => [p.id, p]))
-                // Fetch projections
-                const projRes = await fetch(`https://api.sleeper.app/v1/projections/nfl/regular/${league.season || CURRENT_SEASON}/${week}`)
-                const projRaw = projRes.ok ? normalizeSleeperStats(await projRes.json()) : {}
-                const projPts = {}
-                Object.entries(projRaw).forEach(([pid, s]) => {
-                  const pts = s?.pts_half_ppr ?? s?.pts_std
-                  if (typeof pts === 'number') projPts[pid] = Math.round(pts * 10) / 10
-                })
-                const rosterStr = (ro || []).map(r => {
-                  const p = pById[r.player_id]
-                  return `${r.slot}: ${p?.name || r.player_id} (${p?.position} ${p?.nfl_team || 'FA'}) PROJ:${projPts[r.player_id] ?? '?'}`
-                }).join('\n')
-                const context =
-                  AI_GM_PERSONA + '\n\n' +
-                  `You are the AI GM for "${aiTeam.team_name}" in a ${MAX_TEAMS}-team half-PPR league, week ${week}.
-
-` +
-                  `CURRENT ROSTER (slot: player, proj pts):
-${rosterStr}
-
-` +
-                  `STARTING SLOTS: QB, RB1, RB2, WR1, WR2, TE, FLEX (RB/WR/TE only), K, DEF
-
-` +
-                  `Rules: each player can only start once, FLEX must be RB/WR/TE.
-` +
-                  `Respond ONLY with JSON, no markdown:
-` +
-                  `{"QB":"player_id","RB1":"player_id","RB2":"player_id","WR1":"player_id","WR2":"player_id","TE":"player_id","FLEX":"player_id","K":"player_id","DEF":"player_id","smack":"one short line of good-natured trash talk in your underdog voice"}`
-                const { data, error } = await supabase.functions.invoke('draft-guru', {
-                  body: { context, question: 'Set the optimal lineup for this week.' }
-                })
-                if (error) throw error
-                const text = data?.text || ''
-                const jsonMatch = text.match(/\{[^}]+\}/)
-                if (!jsonMatch) throw new Error('Claude did not return valid JSON')
-                const lineup = JSON.parse(jsonMatch[0])
-                // Apply lineup: update slot for each player
-                for (const [slot, pid] of Object.entries(lineup)) {
-                  if (!ROSTER_SLOTS.includes(slot)) continue
-                  const row = (ro || []).find(r => r.player_id === pid)
-                  if (!row) continue
-                  await supabase.from('rosters').update({ slot }).eq('id', row.id)
-                  // Move displaced player to bench
-                  const displaced = (ro || []).find(r => r.slot === slot && r.player_id !== pid)
-                  if (displaced) {
-                    const benchSlot = BENCH_SLOTS.find(bs => !(ro || []).some(r => r.slot === bs && r.player_id !== displaced.player_id))
-                    if (benchSlot) await supabase.from('rosters').update({ slot: benchSlot }).eq('id', displaced.id)
-                  }
-                }
-                await supabase.from('feed_posts').insert({
-                  league_id: league.id, user_id: aiTeam.user_id,
-                  user_name: aiTeam.team_name, team_name: 'AI LINEUP',
-                  body: (lineup.smack ? lineup.smack + '\n\n' : '') + `Week ${week} lineup: ` +
-                    Object.entries(lineup).filter(([s]) => ROSTER_SLOTS.includes(s))
-                      .map(([s, pid]) => `${s} ${pById[pid]?.name || pid}`).join(' · '),
-                })
-                window.alert('AI lineup set and posted to the feed.')
-              } catch (err) {
-                window.alert(`AI lineup failed: ${err.message}`)
-              }
-              setBusy(false)
-            }}>
+            <button className="btn btn-sm" disabled={busy} onClick={setAiLineup}>
               🤖 Set AI team lineup (week {league.current_week || 1})
             </button>
           </div>
@@ -6371,6 +6532,279 @@ function DraftGrades({ league, teams, myTeamId, isLeagueAdmin, session }) {
           {coachMsg && <p className={`msg ${coachMsg.t}`}>{coachMsg.v}</p>}
         </>
       )}
+    </div>
+  )
+}
+
+// ============================================================
+// SETUP SHEET — add to home screen + enable notifications
+// ============================================================
+function SetupSheet({ session, onClose }) {
+  const platform = detectPlatform()
+  const installed = isStandalone()
+  const [perm, setPerm] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window
+  // iOS only allows web push once the app is installed to the home screen
+  const iosBlocked = platform === 'ios' && !installed
+
+  const enablePush = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      if (!pushSupported) throw new Error('This browser does not support notifications.')
+      if (VAPID_PUBLIC_KEY.startsWith('REPLACE')) {
+        throw new Error('Notifications are not configured yet — the commissioner needs to add the VAPID key.')
+      }
+      const permission = await Notification.requestPermission()
+      setPerm(permission)
+      if (permission !== 'granted') throw new Error('Notifications were blocked. Enable them in your browser settings.')
+
+      const reg = await navigator.serviceWorker.ready
+      let sub = await reg.pushManager.getSubscription()
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        })
+      }
+      const json = sub.toJSON()
+      const { data: team } = await supabase.from('teams')
+        .select('league_id').eq('user_id', session.user.id).limit(1).maybeSingle()
+      const { error } = await supabase.from('push_subscriptions').upsert({
+        user_id: session.user.id,
+        league_id: team?.league_id || null,
+        endpoint: json.endpoint,
+        p256dh: json.keys?.p256dh,
+        auth: json.keys?.auth,
+        user_agent: navigator.userAgent.slice(0, 200),
+      }, { onConflict: 'endpoint' })
+      if (error) throw error
+      setMsg({ t: 'ok', v: "You're subscribed. Trade offers and lineup reminders will come through." })
+    } catch (e) {
+      setMsg({ t: 'err', v: e.message })
+    }
+    setBusy(false)
+  }
+
+  const steps = {
+    ios: [
+      'Open this page in Safari (not Chrome).',
+      'Tap the Share button — the square with an arrow at the bottom.',
+      'Scroll and tap "Add to Home Screen".',
+      'Tap Add. Open the app from your home screen from now on.',
+    ],
+    android: [
+      'Tap the ⋮ menu in Chrome.',
+      'Tap "Install app" or "Add to Home screen".',
+      'Confirm. The app will open in its own window.',
+    ],
+    desktop: [
+      'Click the install icon in your browser address bar (a monitor or ⊕ symbol).',
+      'Or use the browser menu → "Install BOL Fantasy Football".',
+    ],
+  }[platform]
+
+  return (
+    <>
+      <div className="drawer-backdrop" onClick={onClose} />
+      <div className="setup-sheet">
+        <div className="setup-head">
+          <h2 style={{ marginBottom: 0 }}>Get the app</h2>
+          <button className="hamburger" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="setup-block">
+          <div className="setup-step-head">
+            <span className={`setup-num ${installed ? 'done' : ''}`}>{installed ? '✓' : '1'}</span>
+            <b>Add to your home screen</b>
+          </div>
+          {installed ? (
+            <p className="sub" style={{ marginBottom: 0 }}>
+              Installed — you're running the standalone app. Nice.
+            </p>
+          ) : (
+            <ol className="setup-list">
+              {steps.map((s, i) => <li key={i}>{s}</li>)}
+            </ol>
+          )}
+        </div>
+
+        <div className="setup-block">
+          <div className="setup-step-head">
+            <span className={`setup-num ${perm === 'granted' ? 'done' : ''}`}>{perm === 'granted' ? '✓' : '2'}</span>
+            <b>Turn on notifications</b>
+          </div>
+          <p className="sub">
+            Trade offers, lineup lock reminders, and when your matchup goes final.
+          </p>
+          {iosBlocked && (
+            <div className="lock-banner" style={{ marginBottom: 10 }}>
+              On iPhone, notifications only work after you add the app to your home screen — finish step 1 first,
+              then open the app from your home screen and come back here.
+            </div>
+          )}
+          {perm === 'denied' && (
+            <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: 'var(--red-soft)', marginBottom: 10 }}>
+              Notifications are blocked for this site. Re-enable them in your browser settings, then try again.
+            </div>
+          )}
+          <button className="btn btn-primary" style={{ width: '100%' }}
+            disabled={busy || iosBlocked || perm === 'granted' || !pushSupported}
+            onClick={enablePush}>
+            {perm === 'granted' ? '✓ Notifications on'
+              : busy ? 'Enabling…'
+              : !pushSupported ? 'Not supported on this browser'
+              : 'Enable notifications'}
+          </button>
+          {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
+        </div>
+
+        <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onClose}>Done</button>
+      </div>
+    </>
+  )
+}
+
+// ============================================================
+// COMMISH WEEK — the plain-English weekly checklist
+// ============================================================
+function CommishWeek({ league, teams, busy, setTab, onSetLock, onClearLock, onAdvance, onAiLineup, onReseed }) {
+  const week = league.current_week || 1
+  const [state, setState] = useState({ loading: true })
+
+  const load = useCallback(async () => {
+    const { data: mu } = await supabase.from('matchups').select('completed')
+      .eq('league_id', league.id).eq('week', week).eq('is_playoff', false)
+    const games = mu || []
+    const finalized = games.length > 0 && games.every(g => g.completed)
+    const { data: posts } = await supabase.from('feed_posts').select('team_name, created_at')
+      .eq('league_id', league.id).order('created_at', { ascending: false }).limit(40)
+    const recap = (posts || []).some(p => (p.team_name || '') === `WEEK ${week} RECAP`)
+    const aiLineup = (posts || []).some(p => (p.team_name || '') === 'AI LINEUP' &&
+      new Date(p.created_at).getTime() > Date.now() - 7 * 86400000)
+    setState({ loading: false, games: games.length, finalized, recap, aiLineup })
+  }, [league.id, week])
+
+  useEffect(() => { load() }, [load])
+
+  const lockMs = league.lineup_lock_at ? new Date(league.lineup_lock_at).getTime() : null
+  const lockSet = lockMs != null
+  const locked = lockMs != null && Date.now() >= lockMs
+  const hasAI = teams.some(t => t.is_ai_team)
+  const src = league.stats_source || 'live'
+  const liveStats = src === 'live'
+
+  if (state.loading) return null
+
+  // Decide what the commissioner should actually do right now
+  const steps = []
+
+  if (!liveStats) {
+    steps.push({
+      key: 'stats', status: 'urgent',
+      title: 'Switch stats back to live',
+      body: `Scoring is reading 2025 week ${src.split(':')[1]} from testing. Sunday scores will be wrong until this is live.`,
+      action: null, hint: 'Use the "Use live stats" button below.',
+    })
+  }
+
+  steps.push({
+    key: 'lineups', status: hasAI && !state.aiLineup ? 'todo' : 'done',
+    title: `Set The ${teams.find(t => t.is_ai_team)?.team_name || 'AI team'} lineup`,
+    body: hasAI
+      ? (state.aiLineup
+        ? 'Claude has set a lineup in the last week.'
+        : 'Let Claude pick the AI team’s starters for this week. Best done Thursday, after projections update.')
+      : 'No AI team in this league.',
+    action: hasAI && !state.aiLineup ? { label: '🤖 Set AI lineup', fn: onAiLineup } : null,
+  })
+
+  steps.push({
+    key: 'reseed', status: 'optional',
+    title: 'Refresh player data',
+    body: 'Pulls current injury tags and clears players who were cut. Do this once a week — Thursday or Friday is ideal.',
+    action: { label: 'Refresh players', fn: onReseed },
+  })
+
+  steps.push({
+    key: 'lock', status: lockSet ? 'done' : 'todo',
+    title: 'Lock lineups for Sunday',
+    body: lockSet
+      ? `Lineups ${locked ? 'locked' : 'lock'} ${new Date(lockMs).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`
+      : 'Nobody can change lineups after kickoff once this is set. Do it before Sunday morning.',
+    action: lockSet
+      ? { label: 'Clear lock', fn: onClearLock, ghost: true }
+      : { label: 'Lock at Sunday 1pm ET', fn: onSetLock },
+  })
+
+  steps.push({
+    key: 'finalize', status: state.finalized ? 'done' : 'todo',
+    title: `Finalize week ${week} scores`,
+    body: state.games === 0
+      ? 'No games scheduled this week.'
+      : state.finalized
+        ? 'Scores are locked in and standings are updated.'
+        : 'After the Sunday/Monday games end, this writes the final scores and updates standings.',
+    action: state.games > 0 && !state.finalized
+      ? { label: 'Go to Matchup tab →', fn: () => setTab && setTab('scores') }
+      : null,
+  })
+
+  steps.push({
+    key: 'recap', status: state.recap ? 'done' : 'optional',
+    title: 'Post the week recap',
+    body: state.recap
+      ? 'Coach has posted this week’s recap.'
+      : 'Have Coach Sunday write up the week and post it to the feed. Do this after finalizing.',
+    action: !state.recap && state.finalized
+      ? { label: 'Go to Feed →', fn: () => setTab && setTab('feed') }
+      : null,
+  })
+
+  steps.push({
+    key: 'advance', status: state.finalized ? 'todo' : 'blocked',
+    title: `Advance to week ${week + 1}`,
+    body: state.finalized
+      ? 'Carries rosters forward, reopens lineups, and clears the lock. Do this last.'
+      : `Finalize week ${week} first.`,
+    action: state.finalized ? { label: `Advance to week ${week + 1}`, fn: onAdvance } : null,
+  })
+
+  const icon = s => s === 'done' ? '✓' : s === 'urgent' ? '!' : s === 'blocked' ? '·' : s === 'optional' ? '○' : '→'
+
+  return (
+    <div className="cw">
+      <div className="cw-head">
+        <div>
+          <span className="adv-label" style={{ margin: 0 }}>Your checklist</span>
+          <h3 className="cw-title">Week {week}</h3>
+        </div>
+        <button className="btn btn-xs btn-ghost" onClick={load}>Refresh</button>
+      </div>
+
+      {steps.map(s => (
+        <div key={s.key} className={`cw-step ${s.status}`}>
+          <span className="cw-ico">{icon(s.status)}</span>
+          <div className="cw-body">
+            <b>{s.title}</b>
+            <p>{s.body}</p>
+            {s.hint && <p className="cw-hint">{s.hint}</p>}
+            {s.action && (
+              <button className={`btn btn-sm ${s.action.ghost ? 'btn-ghost' : 'btn-primary'} cw-btn`}
+                disabled={busy} onClick={s.action.fn}>
+                {s.action.label}
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <p className="cw-foot">
+        Sundays run themselves — scores update live while anyone has the app open. You only act after the games.
+      </p>
     </div>
   )
 }
