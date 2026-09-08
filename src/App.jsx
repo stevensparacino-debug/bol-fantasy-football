@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/icon/app-icon.svg'
-const BUILD = 'v9.47' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.48' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -2984,16 +2984,26 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
   // ---------- WEEK & LINEUP LOCK (active season) ----------
   const [weekMsg, setWeekMsg] = useState(null)
 
-  const setLockThursdayTNF = async () => {
-    const at = nextThursday815pmET()
-    if (!at) return
+  // Optional override: freeze the WHOLE league at the week's first kickoff.
+  // Normally unnecessary — players lock individually at their own game time.
+  const setLockFirstKickoff = async () => {
+    let at = null
+    try {
+      const map = await fetchKickoffs(league.season || CURRENT_SEASON, league.current_week || 1)
+      const times = Object.values(map).map(e => e.kickoff).filter(Boolean)
+      if (times.length) at = new Date(Math.min(...times))
+    } catch { /* fall through */ }
+    if (!at) {
+      setWeekMsg({ t: 'err', v: "Couldn't load kickoff times — try the Sunday 1pm option instead." })
+      return
+    }
     await supabase.from('leagues').update({ lineup_lock_at: at.toISOString() }).eq('id', league.id)
-    setWeekMsg({ t: 'ok', v: `Lineups lock ${at.toLocaleString()} (your local time) — Thursday kickoff.` })
+    setWeekMsg({ t: 'ok', v: `All lineups now lock ${at.toLocaleString()} — the week's first kickoff.` })
     if (!isMock) {
       sendPush({
         league_id: league.id,
-        title: '⏰ Lineups lock Thursday',
-        body: `Week ${league.current_week || 1} lineups lock at Thursday night kickoff, 8:15 PM ET.`,
+        title: '⏰ Lineups lock at first kickoff',
+        body: `Week ${league.current_week || 1}: the commissioner has frozen all lineups at the first game.`,
         tag: 'lock',
       })
     }
@@ -3030,7 +3040,7 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     await sendPush({
       user_id: data?.user?.id,
       title: '📋 Commissioner checklist',
-      body: `Week ${league.current_week || 1}: refresh players, set the AI lineup, and lock lineups before Thursday 8:15 PM ET.`,
+      body: `Week ${league.current_week || 1}: refresh player data and set the AI team lineup before the first game kicks off.`,
       tag: 'commish',
     })
     setWeekMsg({ t: 'ok', v: 'Reminder sent to your devices.' })
@@ -3224,7 +3234,7 @@ ${rosterStr}
       {!isMock && league.status === 'active' && (
         <CommishWeek
           league={league} teams={teams} busy={busy} setTab={setTab}
-          onSetLock={setLockThursdayTNF} onSetLockSunday={setLockNextSunday}
+          onSetLock={setLockFirstKickoff} onSetLockSunday={setLockNextSunday}
           onClearLock={clearLock} onRemindMe={remindMe}
           onAdvance={advanceWeek} onAiLineup={setAiLineup} onReseed={seedPlayers}
         />
@@ -3336,16 +3346,17 @@ ${rosterStr}
           <hr className="divider" />
           <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>Week & lineup lock</h3>
           <p className="sub">
-            Week {league.current_week || 1} ·{' '}
+            Lineups lock per player at their own kickoff — these buttons are only for
+            freezing the entire league early (playoffs, disputes). Week {league.current_week || 1} ·{' '}
             {league.lineup_lock_at
               ? `lineups lock ${new Date(league.lineup_lock_at).toLocaleString()}`
               : 'no lineup lock set'}
           </p>
           <div className="admin-actions">
-            <button className="btn btn-primary" disabled={busy} onClick={setLockThursdayTNF}>
-              Lock at Thursday 8:15pm ET (TNF)
+            <button className="btn" disabled={busy} onClick={setLockFirstKickoff}>
+              Freeze all lineups at first kickoff
             </button>
-            <button className="btn" disabled={busy} onClick={setLockNextSunday}>Lock at Sunday 1pm ET</button>
+            <button className="btn" disabled={busy} onClick={setLockNextSunday}>Freeze all at Sunday 1pm ET</button>
             <button className="btn" disabled={busy || !league.lineup_lock_at} onClick={clearLock}>Clear lock</button>
             <button className="btn btn-sm btn-ghost" disabled={busy} onClick={remindMe}>
               📲 Remind me on my phone
@@ -7237,9 +7248,21 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
   const lockMs = league.lineup_lock_at ? new Date(league.lineup_lock_at).getTime() : null
   const lockSet = lockMs != null
   const locked = lockMs != null && Date.now() >= lockMs
-  const tnf = nextThursday815pmET()
-  const hrsToTnf = tnf ? (tnf.getTime() - Date.now()) / 3600000 : null
-  const lockCoversTnf = lockSet && tnf && lockMs <= tnf.getTime() + 60000
+
+  // The week's real first kickoff — never assume Thursday. Some weeks open
+  // Wednesday, some Friday or Saturday, and the season opener moves around.
+  const [firstKick, setFirstKick] = useState(null)
+  useEffect(() => {
+    let mounted = true
+    fetchKickoffs(league.season || CURRENT_SEASON, week)
+      .then(map => {
+        const times = Object.values(map).map(e => e.kickoff).filter(Boolean)
+        if (mounted && times.length) setFirstKick(Math.min(...times))
+      })
+      .catch(() => {})
+    return () => { mounted = false }
+  }, [league.season, week])
+  const hrsToFirst = firstKick ? (firstKick - Date.now()) / 3600000 : null
   const hasAI = teams.some(t => t.is_ai_team)
   const aiName = teams.find(t => t.is_ai_team)?.team_name || 'AI team'
   const statsSrc = league.stats_source || 'live'
@@ -7250,8 +7273,11 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
   const fmtEt = d => d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 
   // Tue/Wed = wrap up + prep. Thu = deadline day. Fri-Mon = games.
-  const phase = etParts.dow === 2 || etParts.dow === 3 ? 'prep'
-    : etParts.dow === 4 ? 'deadline' : 'games'
+  // Phase comes from the schedule, not the calendar day
+  const phase = hrsToFirst == null ? 'prep'
+    : hrsToFirst > 24 ? 'prep'
+    : hrsToFirst > 0 ? 'deadline'
+    : 'games'
 
   const steps = []
 
@@ -7295,7 +7321,8 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
   })
 
   steps.push({
-    key: 'reseed', status: 'optional', when: 'Thursday',
+    key: 'reseed', status: 'optional',
+    when: firstKick ? `Before ${fmtEt(new Date(firstKick))}` : 'Before first kickoff',
     title: 'Refresh player data',
     body: 'Pulls current injury tags and clears anyone who got cut. Do it before you set lineups.',
     action: { label: 'Refresh players', fn: onReseed },
@@ -7304,12 +7331,15 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
   if (hasAI) {
     steps.push({
       key: 'ai',
-      status: state.aiLineup ? 'done' : (phase === 'games' ? 'late' : 'todo'),
-      when: 'Thursday',
+      status: state.aiLineup ? 'done'
+        : (hrsToFirst != null && hrsToFirst < 6 ? 'urgent' : 'todo'),
+      when: firstKick ? `Before ${fmtEt(new Date(firstKick))}` : 'Before first kickoff',
       title: `Set the ${aiName} lineup`,
       body: state.aiLineup
-        ? 'Claude has set a lineup in the last few days.'
-        : 'Claude picks the AI team’s starters from this week’s projections. Must happen before the lock.',
+        ? 'Claude has set a lineup for this week.'
+        : firstKick
+          ? `Claude picks the AI team's starters from this week's projections. First kickoff is ${fmtEt(new Date(firstKick))} — after that, those players are locked.`
+          : 'Claude picks the AI team’s starters from this week’s projections. Do it before the first game.',
       action: !state.aiLineup ? { label: '🤖 Set AI lineup', fn: onAiLineup } : null,
     })
   }
@@ -7339,7 +7369,7 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
       <div className="cw-head">
         <div>
           <span className="adv-label" style={{ margin: 0 }}>
-            {etParts.label} · {phase === 'prep' ? 'wrap-up & prep' : phase === 'deadline' ? 'deadline day' : 'game days'}
+            {etParts.label} · {phase === 'prep' ? 'prep time' : phase === 'deadline' ? 'kickoff soon' : 'games underway'}
           </span>
           <h3 className="cw-title">Week {week} · {todo === 0 ? 'all set' : `${todo} to do`}</h3>
         </div>
@@ -7352,9 +7382,9 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
       </div>
 
       <div className="cw-cadence">
-        <span><b>Tue</b> — finalize · recap · advance</span>
-        <span><b>Thu</b> — refresh players · set the AI lineup before 8:15pm ET</span>
-        <span><b>Thu–Mon</b> — games run themselves; players lock at their own kickoff</span>
+        <span><b>After the last game</b> — finalize · recap · advance the week</span>
+        <span><b>Before first kickoff</b>{firstKick ? ` (${fmtEt(new Date(firstKick))})` : ''} — refresh players · set the AI lineup</span>
+        <span><b>Game days</b> — nothing to do; players lock at their own kickoff</span>
       </div>
 
       {steps.map(s => (
@@ -7384,7 +7414,8 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
 
       <p className="cw-foot">
         Managers can edit lineups all week; each player locks automatically at his own kickoff.
-        Your only hard deadline is the AI team's lineup before Thursday night. Scores update live on their own.
+        Your only hard deadline is the AI team's lineup before the week's first game
+        {firstKick ? ` (${fmtEt(new Date(firstKick))})` : ''}. Scores update live on their own.
       </p>
     </div>
   )
