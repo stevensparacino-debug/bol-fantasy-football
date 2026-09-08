@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/icon/app-icon.svg'
-const BUILD = 'v9.41' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.42' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -718,6 +718,19 @@ select.input { appearance: none; }
 .cw-body p { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
 .cw-hint { color: var(--orange) !important; font-weight: 600; }
 .cw-btn { margin-top: 8px; }
+.cw-cadence {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;
+  font-size: 11px; color: var(--muted); letter-spacing: 0.02em;
+}
+.cw-cadence b { color: var(--text); }
+.cw-titlerow { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.cw-when {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--faint); white-space: nowrap;
+}
+.cw-step.late .cw-ico { background: var(--yellow); color: var(--on-accent); }
 .cw-foot {
   font-size: 11px; color: var(--faint); margin-top: 12px;
   padding-top: 12px; border-top: 1px solid var(--line); line-height: 1.5;
@@ -1314,6 +1327,32 @@ function makeJoinCode() {
   for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)]
   return code
 }
+
+// Next occurrence of a given weekday + time in Eastern, DST-safe.
+// dow: 0=Sun … 6=Sat. Scans forward in 15-minute steps and asks Intl what
+// the Eastern wall-clock reads, so EDT/EST is never hardcoded.
+function nextEtSlot(dow, hour, minute, from = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'short',
+    hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+  })
+  const DOW = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const step = 15 * 60000
+  let t = Math.ceil((from.getTime() + 60000) / step) * step
+  const limit = from.getTime() + 15 * 86400000
+  for (; t < limit; t += step) {
+    const d = new Date(t)
+    const parts = fmt.formatToParts(d)
+    const get = k => parts.find(p => p.type === k)?.value
+    if (DOW[get('weekday')] === dow &&
+        parseInt(get('hour'), 10) === hour &&
+        parseInt(get('minute'), 10) === minute) return d
+  }
+  return null
+}
+
+// Thursday Night Football kickoff — the real weekly deadline
+const nextThursday815pmET = (from) => nextEtSlot(4, 20, 15, from)
 
 // Next Sunday at 1:00 PM Eastern, DST-safe (17:00 UTC during EDT, 18:00 during EST)
 function nextSunday1pmET(from = new Date()) {
@@ -2758,6 +2797,32 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
   // ---------- WEEK & LINEUP LOCK (active season) ----------
   const [weekMsg, setWeekMsg] = useState(null)
 
+  const setLockThursdayTNF = async () => {
+    const at = nextThursday815pmET()
+    if (!at) return
+    await supabase.from('leagues').update({ lineup_lock_at: at.toISOString() }).eq('id', league.id)
+    setWeekMsg({ t: 'ok', v: `Lineups lock ${at.toLocaleString()} (your local time) — Thursday kickoff.` })
+    if (!isMock) {
+      sendPush({
+        league_id: league.id,
+        title: '⏰ Lineups lock Thursday',
+        body: `Week ${league.current_week || 1} lineups lock at Thursday night kickoff, 8:15 PM ET.`,
+        tag: 'lock',
+      })
+    }
+  }
+
+  const remindMe = async () => {
+    const { data } = await supabase.auth.getUser()
+    await sendPush({
+      user_id: data?.user?.id,
+      title: '📋 Commissioner checklist',
+      body: `Week ${league.current_week || 1}: refresh players, set the AI lineup, and lock lineups before Thursday 8:15 PM ET.`,
+      tag: 'commish',
+    })
+    setWeekMsg({ t: 'ok', v: 'Reminder sent to your devices.' })
+  }
+
   const setLockNextSunday = async () => {
     const at = nextSunday1pmET()
     await supabase.from('leagues').update({ lineup_lock_at: at.toISOString() }).eq('id', league.id)
@@ -2946,7 +3011,8 @@ ${rosterStr}
       {!isMock && league.status === 'active' && (
         <CommishWeek
           league={league} teams={teams} busy={busy} setTab={setTab}
-          onSetLock={setLockNextSunday} onClearLock={clearLock}
+          onSetLock={setLockThursdayTNF} onSetLockSunday={setLockNextSunday}
+          onClearLock={clearLock} onRemindMe={remindMe}
           onAdvance={advanceWeek} onAiLineup={setAiLineup} onReseed={seedPlayers}
         />
       )}
@@ -3063,8 +3129,14 @@ ${rosterStr}
               : 'no lineup lock set'}
           </p>
           <div className="admin-actions">
+            <button className="btn btn-primary" disabled={busy} onClick={setLockThursdayTNF}>
+              Lock at Thursday 8:15pm ET (TNF)
+            </button>
             <button className="btn" disabled={busy} onClick={setLockNextSunday}>Lock at Sunday 1pm ET</button>
             <button className="btn" disabled={busy || !league.lineup_lock_at} onClick={clearLock}>Clear lock</button>
+            <button className="btn btn-sm btn-ghost" disabled={busy} onClick={remindMe}>
+              📲 Remind me on my phone
+            </button>
             <button className="btn btn-turf" disabled={busy} onClick={advanceWeek}>
               Advance to week {(league.current_week || 1) + 1}
             </button>
@@ -6765,7 +6837,7 @@ function SetupSheet({ session, onClose }) {
 // ============================================================
 // COMMISH WEEK — the plain-English weekly checklist
 // ============================================================
-function CommishWeek({ league, teams, busy, setTab, onSetLock, onClearLock, onAdvance, onAiLineup, onReseed }) {
+function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, onClearLock, onRemindMe, onAdvance, onAiLineup, onReseed }) {
   const week = league.current_week || 1
   const [state, setState] = useState({ loading: true })
 
@@ -6778,112 +6850,159 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onClearLock, onAd
       .eq('league_id', league.id).order('created_at', { ascending: false }).limit(40)
     const recap = (posts || []).some(p => (p.team_name || '') === `WEEK ${week} RECAP`)
     const aiLineup = (posts || []).some(p => (p.team_name || '') === 'AI LINEUP' &&
-      new Date(p.created_at).getTime() > Date.now() - 7 * 86400000)
+      new Date(p.created_at).getTime() > Date.now() - 5 * 86400000)
     setState({ loading: false, games: games.length, finalized, recap, aiLineup })
   }, [league.id, week])
 
   useEffect(() => { load() }, [load])
 
+  // Where are we in the NFL week, in Eastern time?
+  const etParts = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', hourCycle: 'h23',
+    })
+    const p = fmt.formatToParts(new Date())
+    const get = k => p.find(x => x.type === k)?.value
+    const DOW = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+    return { dow: DOW[get('weekday')], hour: parseInt(get('hour'), 10), label: get('weekday') }
+  }, [])
+
   const lockMs = league.lineup_lock_at ? new Date(league.lineup_lock_at).getTime() : null
   const lockSet = lockMs != null
   const locked = lockMs != null && Date.now() >= lockMs
+  const tnf = nextThursday815pmET()
+  const hrsToTnf = tnf ? (tnf.getTime() - Date.now()) / 3600000 : null
+  const lockCoversTnf = lockSet && tnf && lockMs <= tnf.getTime() + 60000
   const hasAI = teams.some(t => t.is_ai_team)
-  const src = league.stats_source || 'live'
-  const liveStats = src === 'live'
+  const aiName = teams.find(t => t.is_ai_team)?.team_name || 'AI team'
+  const statsSrc = league.stats_source || 'live'
+  const liveStats = statsSrc === 'live'
 
   if (state.loading) return null
 
-  // Decide what the commissioner should actually do right now
+  const fmtEt = d => d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+
+  // Tue/Wed = wrap up + prep. Thu = deadline day. Fri-Mon = games.
+  const phase = etParts.dow === 2 || etParts.dow === 3 ? 'prep'
+    : etParts.dow === 4 ? 'deadline' : 'games'
+
   const steps = []
 
   if (!liveStats) {
     steps.push({
-      key: 'stats', status: 'urgent',
+      key: 'stats', status: 'urgent', when: 'Right now',
       title: 'Switch stats back to live',
-      body: `Scoring is reading 2025 week ${src.split(':')[1]} from testing. Sunday scores will be wrong until this is live.`,
-      action: null, hint: 'Use the "Use live stats" button below.',
+      body: `Scoring is still reading 2025 week ${statsSrc.split(':')[1]} from testing. Every score will be wrong until this is live.`,
+      hint: 'Use the "Use live stats" button below.',
     })
   }
 
   steps.push({
-    key: 'lineups', status: hasAI && !state.aiLineup ? 'todo' : 'done',
-    title: `Set The ${teams.find(t => t.is_ai_team)?.team_name || 'AI team'} lineup`,
-    body: hasAI
-      ? (state.aiLineup
-        ? 'Claude has set a lineup in the last week.'
-        : 'Let Claude pick the AI team’s starters for this week. Best done Thursday, after projections update.')
-      : 'No AI team in this league.',
-    action: hasAI && !state.aiLineup ? { label: '🤖 Set AI lineup', fn: onAiLineup } : null,
-  })
-
-  steps.push({
-    key: 'reseed', status: 'optional',
-    title: 'Refresh player data',
-    body: 'Pulls current injury tags and clears players who were cut. Do this once a week — Thursday or Friday is ideal.',
-    action: { label: 'Refresh players', fn: onReseed },
-  })
-
-  steps.push({
-    key: 'lock', status: lockSet ? 'done' : 'todo',
-    title: 'Lock lineups for Sunday',
-    body: lockSet
-      ? `Lineups ${locked ? 'locked' : 'lock'} ${new Date(lockMs).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`
-      : 'Nobody can change lineups after kickoff once this is set. Do it before Sunday morning.',
-    action: lockSet
-      ? { label: 'Clear lock', fn: onClearLock, ghost: true }
-      : { label: 'Lock at Sunday 1pm ET', fn: onSetLock },
-  })
-
-  steps.push({
-    key: 'finalize', status: state.finalized ? 'done' : 'todo',
+    key: 'finalize',
+    status: state.finalized ? 'done' : state.games === 0 ? 'blocked' : (phase === 'prep' ? 'todo' : 'late'),
+    when: 'Tuesday',
     title: `Finalize week ${week} scores`,
-    body: state.games === 0
-      ? 'No games scheduled this week.'
-      : state.finalized
-        ? 'Scores are locked in and standings are updated.'
-        : 'After the Sunday/Monday games end, this writes the final scores and updates standings.',
+    body: state.games === 0 ? 'No games scheduled this week.'
+      : state.finalized ? 'Scores locked in, standings updated.'
+      : 'Monday Night Football is done — write the final scores and move the standings.',
     action: state.games > 0 && !state.finalized
-      ? { label: 'Go to Matchup tab →', fn: () => setTab && setTab('scores') }
-      : null,
+      ? { label: 'Go to Matchup tab →', fn: () => setTab && setTab('scores') } : null,
   })
 
   steps.push({
-    key: 'recap', status: state.recap ? 'done' : 'optional',
+    key: 'recap', status: state.recap ? 'done' : 'optional', when: 'Tuesday',
     title: 'Post the week recap',
-    body: state.recap
-      ? 'Coach has posted this week’s recap.'
-      : 'Have Coach Sunday write up the week and post it to the feed. Do this after finalizing.',
+    body: state.recap ? 'Coach has posted this week’s recap.'
+      : 'Let Coach Sunday write up the week. Best right after finalizing, while people still care.',
     action: !state.recap && state.finalized
-      ? { label: 'Go to Feed →', fn: () => setTab && setTab('feed') }
-      : null,
+      ? { label: 'Go to Feed →', fn: () => setTab && setTab('feed') } : null,
   })
 
   steps.push({
-    key: 'advance', status: state.finalized ? 'todo' : 'blocked',
+    key: 'advance', status: state.finalized ? 'todo' : 'blocked', when: 'Tuesday',
     title: `Advance to week ${week + 1}`,
     body: state.finalized
-      ? 'Carries rosters forward, reopens lineups, and clears the lock. Do this last.'
+      ? 'Carries rosters forward, reopens lineups and free agency, clears the lock.'
       : `Finalize week ${week} first.`,
     action: state.finalized ? { label: `Advance to week ${week + 1}`, fn: onAdvance } : null,
   })
 
-  const icon = s => s === 'done' ? '✓' : s === 'urgent' ? '!' : s === 'blocked' ? '·' : s === 'optional' ? '○' : '→'
+  steps.push({
+    key: 'reseed', status: 'optional', when: 'Thursday',
+    title: 'Refresh player data',
+    body: 'Pulls current injury tags and clears anyone who got cut. Do it before you set lineups.',
+    action: { label: 'Refresh players', fn: onReseed },
+  })
+
+  if (hasAI) {
+    steps.push({
+      key: 'ai',
+      status: state.aiLineup ? 'done' : (phase === 'games' ? 'late' : 'todo'),
+      when: 'Thursday',
+      title: `Set the ${aiName} lineup`,
+      body: state.aiLineup
+        ? 'Claude has set a lineup in the last few days.'
+        : 'Claude picks the AI team’s starters from this week’s projections. Must happen before the lock.',
+      action: !state.aiLineup ? { label: '🤖 Set AI lineup', fn: onAiLineup } : null,
+    })
+  }
+
+  steps.push({
+    key: 'lock',
+    status: lockCoversTnf ? 'done' : (hrsToTnf != null && hrsToTnf < 6 ? 'urgent' : 'todo'),
+    when: 'Thursday, before 8:15pm ET',
+    title: 'Lock lineups for Thursday kickoff',
+    body: lockCoversTnf
+      ? `Lineups ${locked ? 'locked' : 'lock'} ${fmtEt(new Date(lockMs))} — before Thursday kickoff. You’re set.`
+      : lockSet
+        ? `Your lock is set for ${fmtEt(new Date(lockMs))}, which is AFTER Thursday kickoff. Anyone with a Thursday player could bench them after seeing the result.`
+        : `Thursday kickoff is ${tnf ? fmtEt(tnf) : 'this week'}. Lock before then, or Thursday games can be gamed.`,
+    action: lockCoversTnf
+      ? { label: 'Clear lock', fn: onClearLock, ghost: true }
+      : { label: 'Lock at Thursday 8:15pm ET', fn: onSetLock },
+    alt: !lockCoversTnf && onSetLockSunday
+      ? { label: 'No Thursday starters? Lock Sunday 1pm instead', fn: onSetLockSunday }
+      : null,
+  })
+
+  const order = { urgent: 0, late: 1, todo: 2, optional: 3, done: 4, blocked: 5 }
+  steps.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))
+
+  const icon = s => s === 'done' ? '✓' : (s === 'urgent' || s === 'late') ? '!' :
+    s === 'blocked' ? '·' : s === 'optional' ? '○' : '→'
+  const todo = steps.filter(s => ['todo', 'urgent', 'late'].includes(s.status)).length
 
   return (
     <div className="cw">
       <div className="cw-head">
         <div>
-          <span className="adv-label" style={{ margin: 0 }}>Your checklist</span>
-          <h3 className="cw-title">Week {week}</h3>
+          <span className="adv-label" style={{ margin: 0 }}>
+            {etParts.label} · {phase === 'prep' ? 'wrap-up & prep' : phase === 'deadline' ? 'deadline day' : 'game days'}
+          </span>
+          <h3 className="cw-title">Week {week} · {todo === 0 ? 'all set' : `${todo} to do`}</h3>
         </div>
-        <button className="btn btn-xs btn-ghost" onClick={load}>Refresh</button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {onRemindMe && (
+            <button className="btn btn-xs btn-ghost" disabled={busy} onClick={onRemindMe}>📲 Remind me</button>
+          )}
+          <button className="btn btn-xs btn-ghost" onClick={load}>Refresh</button>
+        </div>
+      </div>
+
+      <div className="cw-cadence">
+        <span><b>Tue</b> — finalize · recap · advance</span>
+        <span><b>Thu</b> — refresh players · AI lineup · <b>lock by 8:15pm ET</b></span>
+        <span><b>Fri–Mon</b> — games run themselves</span>
       </div>
 
       {steps.map(s => (
         <div key={s.key} className={`cw-step ${s.status}`}>
           <span className="cw-ico">{icon(s.status)}</span>
           <div className="cw-body">
-            <b>{s.title}</b>
+            <div className="cw-titlerow">
+              <b>{s.title}</b>
+              <span className="cw-when">{s.when}</span>
+            </div>
             <p>{s.body}</p>
             {s.hint && <p className="cw-hint">{s.hint}</p>}
             {s.action && (
@@ -6892,12 +7011,18 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onClearLock, onAd
                 {s.action.label}
               </button>
             )}
+            {s.alt && (
+              <button className="btn btn-sm btn-ghost cw-btn" disabled={busy} onClick={s.alt.fn}>
+                {s.alt.label}
+              </button>
+            )}
           </div>
         </div>
       ))}
 
       <p className="cw-foot">
-        Sundays run themselves — scores update live while anyone has the app open. You only act after the games.
+        Thursday 8:15pm ET is the real deadline — once TNF kicks off, lineups must already be locked.
+        Sundays and Mondays need nothing from you; scores update live on their own.
       </p>
     </div>
   )
