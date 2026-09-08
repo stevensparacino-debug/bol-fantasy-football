@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/icon/app-icon.svg'
-const BUILD = 'v9.46' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.47' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -49,7 +49,7 @@ const slotAccepts = (position, slot) =>
 // machine with a chip on its shoulder and good-natured trash talk.
 // Web push: paste the PUBLIC half of your VAPID key pair here.
 // (Generate with: npx web-push generate-vapid-keys)
-const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_VAPID_PUBLIC_KEY'
+const VAPID_PUBLIC_KEY = 'BL4qyMA48zMbUiqK-uWTIfHfBqMaZs-SL4dsXwaFAQeqQfXD3z-3ROGIaQVHQ0at9GkGlWhxlXzoi5cppAxqfT0'
 const SW_PATH = '/bol-fantasy-football/sw.js'
 
 const AI_GM_PERSONA = [
@@ -786,6 +786,44 @@ select.input { appearance: none; }
   display: inline-block; margin-left: 5px; min-width: 16px; padding: 1px 5px;
   background: var(--red); color: #fff; border-radius: 999px;
   font-size: 9px; font-weight: 700; vertical-align: middle;
+}
+
+/* ---------- week schedule card ---------- */
+.ws-card { border-left: 4px solid var(--cyan); }
+.ws-title {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; font-size: 22px;
+}
+.ws-count { display: flex; gap: 8px; margin-top: 8px; }
+.ws-cell {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 12px 6px;
+}
+.ws-cell b {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700;
+  font-size: clamp(26px, 7vw, 40px); line-height: 1; color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+.ws-cell span { font-size: 8px; font-weight: 700; letter-spacing: 0.14em; color: var(--faint); }
+.ws-slate { margin-top: 4px; }
+.ws-game {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; margin-bottom: 5px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--surface);
+}
+.ws-game.mine { border-color: var(--orange); background: rgba(248,94,50,0.07); }
+.ws-game.live { border-color: var(--lime); }
+.ws-time {
+  font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-size: 11px;
+  color: var(--muted); min-width: 62px; letter-spacing: 0.04em;
+}
+.ws-game.live .ws-time { color: var(--lime); }
+.ws-teams { flex: 1; font-weight: 700; letter-spacing: 0.02em; min-width: 0; }
+.ws-has { color: var(--orange); }
+.ws-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+  color: var(--orange); white-space: nowrap;
 }
 
 /* ---------- release sheet (add / drop) ---------- */
@@ -2548,6 +2586,9 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
       {league.status === 'active' && (
         <DashboardHero league={league} teams={teams} myTeamId={myTeamId} onFix={() => setTab && setTab('team')} onStandings={() => setTab && setTab('standings')} />
       )}
+      {league.status === 'active' && (
+        <WeekSchedule league={league} myTeamId={myTeamId} />
+      )}
       {pendingTrades > 0 && (
         <div className="alert-banner" style={{ marginTop: 0, marginBottom: 16 }}>
           <span>
@@ -2958,6 +2999,32 @@ function AdminPanel({ league, teams, isMock, session, onEnterMock, onExitMock, r
     }
   }
 
+  const [announceText, setAnnounceText] = useState('')
+  const announce = async () => {
+    const text = announceText.trim()
+    if (!text) return
+    setBusy(true)
+    try {
+      const { data: u } = await supabase.auth.getUser()
+      await supabase.from('feed_posts').insert({
+        league_id: league.id, user_id: u?.user?.id,
+        user_name: 'Commissioner', team_name: 'ANNOUNCEMENT',
+        body: text.slice(0, 500),
+      })
+      await sendPush({
+        league_id: league.id,
+        title: '📣 From the commissioner',
+        body: text.slice(0, 160),
+        tag: 'announce',
+      })
+      setAnnounceText('')
+      setWeekMsg({ t: 'ok', v: 'Announcement posted to the feed and pushed to the league.' })
+    } catch (e) {
+      setWeekMsg({ t: 'err', v: `Announcement failed: ${e.message}` })
+    }
+    setBusy(false)
+  }
+
   const remindMe = async () => {
     const { data } = await supabase.auth.getUser()
     await sendPush({
@@ -3283,6 +3350,21 @@ ${rosterStr}
             <button className="btn btn-sm btn-ghost" disabled={busy} onClick={remindMe}>
               📲 Remind me on my phone
             </button>
+          </div>
+
+          <hr className="divider" />
+          <h3 className="display" style={{ fontSize: 20, marginBottom: 8 }}>League announcement</h3>
+          <p className="sub">Posts to the feed and pushes a notification to everyone who has alerts on.</p>
+          <div className="field">
+            <input className="input" maxLength={300}
+              placeholder="e.g. Set your lineups — Thursday game is Packers at Eagles"
+              value={announceText} onChange={e => setAnnounceText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') announce() }} />
+            <button className="btn btn-primary" disabled={busy || !announceText.trim()} onClick={announce}>
+              📣 Send to league
+            </button>
+          </div>
+          <div className="admin-actions" style={{ marginTop: 0 }}>
             <button className="btn btn-turf" disabled={busy} onClick={advanceWeek}>
               Advance to week {(league.current_week || 1) + 1}
             </button>
@@ -7304,6 +7386,165 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
         Managers can edit lineups all week; each player locks automatically at his own kickoff.
         Your only hard deadline is the AI team's lineup before Thursday night. Scores update live on their own.
       </p>
+    </div>
+  )
+}
+
+// ============================================================
+// WEEK SCHEDULE — countdown to kickoff + the week's slate
+// ============================================================
+function WeekSchedule({ league, myTeamId }) {
+  const week = league.current_week || 1
+  const season = league.season || CURRENT_SEASON
+  const [games, setGames] = useState(null)
+  const [err, setErr] = useState(false)
+  const [myTeamsSet, setMyTeamsSet] = useState(new Set())
+  const [now, setNow] = useState(Date.now())
+  const [open, setOpen] = useState(true)
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Full slate with both teams per game (fetchKickoffs flattens by team,
+  // so we parse the payload again here to keep games intact).
+  useEffect(() => {
+    let mounted = true
+    const run = async () => {
+      try {
+        const res = await fetch(
+          `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` +
+          `?dates=${season}&seasontype=2&week=${week}`)
+        if (!res.ok) throw new Error(String(res.status))
+        const data = await res.json()
+        const list = (data.events || []).map(ev => {
+          const comp = (ev.competitions || [])[0]
+          const teams = (comp?.competitors || []).map(c => ({
+            abbr: ESPN_ALIAS[c.team?.abbreviation] || c.team?.abbreviation,
+            name: c.team?.shortDisplayName || c.team?.abbreviation,
+            score: c.score != null ? Number(c.score) : null,
+            home: c.homeAway === 'home',
+          }))
+          return {
+            id: ev.id,
+            kickoff: new Date(ev.date).getTime(),
+            state: comp?.status?.type?.state,
+            detail: comp?.status?.type?.shortDetail,
+            teams,
+          }
+        }).sort((a, b) => a.kickoff - b.kickoff)
+        if (mounted) { setGames(list); setErr(false) }
+      } catch {
+        if (mounted) setErr(true)
+      }
+    }
+    run()
+    const t = setInterval(run, 120000)
+    return () => { mounted = false; clearInterval(t) }
+  }, [season, week])
+
+  // Which NFL teams do I have players on?
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      if (!myTeamId) return
+      const { data: ro } = await supabase.from('rosters').select('player_id')
+        .eq('league_id', league.id).eq('team_id', myTeamId).eq('week', week)
+      const ids = (ro || []).map(r => r.player_id)
+      if (ids.length === 0) return
+      const { data: ps } = await supabase.from('players').select('nfl_team').in('id', ids)
+      if (mounted) setMyTeamsSet(new Set((ps || []).map(p => p.nfl_team).filter(Boolean)))
+    })()
+    return () => { mounted = false }
+  }, [league.id, myTeamId, week])
+
+  if (err || !games || games.length === 0) return null
+
+  const next = games.find(g => g.kickoff > now)
+  const diff = next ? next.kickoff - now : 0
+  const d = Math.floor(diff / 86400000)
+  const h = Math.floor((diff % 86400000) / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  const s = Math.floor((diff % 60000) / 1000)
+  const pad = n => String(n).padStart(2, '0')
+
+  // Group by day in Eastern time
+  const dayKey = ms => new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'long', month: 'short', day: 'numeric',
+  }).format(new Date(ms))
+  const byDay = games.reduce((acc, g) => {
+    const k = dayKey(g.kickoff)
+    ;(acc[k] = acc[k] || []).push(g)
+    return acc
+  }, {})
+
+  const timeOf = ms => new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
+  }).format(new Date(ms))
+
+  const myCount = g => g.teams.filter(t => myTeamsSet.has(t.abbr)).length
+
+  return (
+    <div className="card ws-card">
+      <div className="hero-top">
+        <div>
+          <span className="adv-label" style={{ margin: 0 }}>NFL week {week}</span>
+          <h3 className="ws-title">
+            {next ? 'Kickoff countdown' : 'Week in progress'}
+          </h3>
+        </div>
+        <button className="btn btn-xs btn-ghost" onClick={() => setOpen(!open)}>
+          {open ? 'Hide' : 'Show'}
+        </button>
+      </div>
+
+      {next && (
+        <>
+          <div className="ws-count">
+            {d > 0 && <div className="ws-cell"><b>{d}</b><span>DAYS</span></div>}
+            <div className="ws-cell"><b>{pad(h)}</b><span>HRS</span></div>
+            <div className="ws-cell"><b>{pad(m)}</b><span>MIN</span></div>
+            <div className="ws-cell"><b>{pad(s)}</b><span>SEC</span></div>
+          </div>
+          <p className="dt-sub" style={{ marginTop: 8 }}>
+            {next.teams.map(t => t.name).join(' vs ')} · {timeOf(next.kickoff)} ET
+            {myCount(next) > 0 && <b style={{ color: 'var(--orange)' }}> · you have players in this game</b>}
+          </p>
+        </>
+      )}
+
+      {open && (
+        <div className="ws-slate">
+          {Object.entries(byDay).map(([day, list]) => (
+            <div key={day}>
+              <p className="adv-label" style={{ marginTop: 14 }}>{day}</p>
+              {list.map(g => {
+                const mine = myCount(g)
+                return (
+                  <div key={g.id} className={`ws-game ${mine > 0 ? 'mine' : ''} ${g.state === 'in' ? 'live' : ''}`}>
+                    <span className="ws-time">
+                      {g.state === 'post' ? 'FINAL' : g.state === 'in' ? 'LIVE' : timeOf(g.kickoff)}
+                    </span>
+                    <span className="ws-teams">
+                      {g.teams.map((t, i) => (
+                        <span key={t.abbr} className={myTeamsSet.has(t.abbr) ? 'ws-has' : ''}>
+                          {t.abbr}{g.state !== 'pre' && t.score != null ? ` ${t.score}` : ''}
+                          {i === 0 ? ' @ ' : ''}
+                        </span>
+                      ))}
+                    </span>
+                    {mine > 0 && <span className="ws-badge">{mine} of yours</span>}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+          <p className="cw-foot">
+            Each of your players locks when his game kicks off. Games with your players are highlighted.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
