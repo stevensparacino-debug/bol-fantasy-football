@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/icon/app-icon.svg'
-const BUILD = 'v9.44' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.46' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -788,6 +788,38 @@ select.input { appearance: none; }
   font-size: 9px; font-weight: 700; vertical-align: middle;
 }
 
+/* ---------- release sheet (add / drop) ---------- */
+.release-sheet {
+  position: fixed; z-index: 62; left: 50%; transform: translateX(-50%);
+  bottom: 0; width: min(480px, 100%);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px 14px 0 0; padding: 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  max-height: 86vh; overflow-y: auto;
+  box-shadow: 0 -12px 40px rgba(0,0,0,0.5);
+}
+.release-list { max-height: 52vh; overflow-y: auto; }
+.release-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; margin-bottom: 6px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+}
+.release-row.blocked { opacity: 0.5; }
+.release-row .lname { flex: 1; min-width: 0; font-weight: 700; }
+
+/* ---------- per-player game locks ---------- */
+.lineup-row.pl-locked { opacity: 0.62; }
+.lineup-row.pl-locked .lname { color: var(--muted); }
+.window-banner {
+  margin-top: 12px; padding: 10px 14px; border-radius: 8px;
+  background: rgba(176,244,54,0.10); border: 1px solid rgba(176,244,54,0.45);
+  color: var(--text); font-size: 12px; line-height: 1.55;
+}
+.window-banner b { color: var(--lime); }
+
 /* ---------- lineup swap picker ---------- */
 .swap-cue {
   font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
@@ -1350,6 +1382,41 @@ async function sendPush({ title, body, url, tag, user_id, league_id }) {
   } catch (e) {
     console.warn('push failed (non-blocking):', e?.message)
   }
+}
+
+// ESPN's public scoreboard gives us kickoff times, which Sleeper does not.
+// Their abbreviations mostly match Sleeper's; these are the exceptions.
+const ESPN_ALIAS = { WSH: 'WAS', JAX: 'JAX', LAR: 'LAR', LAC: 'LAC', LV: 'LV' }
+
+// Returns { TEAM_ABBR: kickoffMillis } for one NFL week, plus game state.
+async function fetchKickoffs(season, week) {
+  const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` +
+    `?dates=${season}&seasontype=2&week=${week}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`ESPN returned ${res.status}`)
+  const data = await res.json()
+  const map = {}
+  ;(data.events || []).forEach(ev => {
+    const kickoff = new Date(ev.date).getTime()
+    const comp = (ev.competitions || [])[0]
+    const state = comp?.status?.type?.state // 'pre' | 'in' | 'post'
+    ;(comp?.competitors || []).forEach(c => {
+      const raw = c.team?.abbreviation
+      const ab = ESPN_ALIAS[raw] || raw
+      if (ab) map[ab] = { kickoff, state }
+    })
+  })
+  return map
+}
+
+// Short game label for a player's team: "SUN 1:00", "IN PROGRESS", "FINAL"
+function gameLabel(entry) {
+  if (!entry) return 'BYE'
+  if (entry.state === 'post') return 'FINAL'
+  if (entry.state === 'in') return 'IN PROGRESS'
+  return new Date(entry.kickoff).toLocaleString(undefined, {
+    weekday: 'short', hour: 'numeric', minute: '2-digit',
+  }).toUpperCase()
 }
 
 function makeJoinCode() {
@@ -5086,6 +5153,15 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
   const canMove = !locked || isLeagueAdmin
 
   const [faProj, setFaProj] = useState({})
+  const [faKickoffs, setFaKickoffs] = useState(null)
+  const [myPlayers, setMyPlayers] = useState({})
+  useEffect(() => {
+    let mounted = true
+    fetchKickoffs(league.season || CURRENT_SEASON, week)
+      .then(m => { if (mounted) setFaKickoffs(m) })
+      .catch(() => {})
+    return () => { mounted = false }
+  }, [league.season, week])
   const reload = useCallback(async () => {
     const all = await loadAllPlayers()
     // A real free agent is on an NFL roster today. Players with no team are
@@ -5107,7 +5183,15 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
       .from('rosters').select('*')
       .eq('league_id', league.id).eq('week', week)
     setRostered(new Set((ro || []).map(r => r.player_id)))
-    setMyRoster((ro || []).filter(r => r.team_id === myTeamId))
+    const mine = (ro || []).filter(r => r.team_id === myTeamId)
+    setMyRoster(mine)
+    // Fetch my players explicitly — a cut or inactive player won't be in the
+    // free-agent pool, which used to leave the release list showing blank rows.
+    const myIds = mine.map(r => r.player_id)
+    if (myIds.length) {
+      const { data: ps } = await supabase.from('players').select('*').in('id', myIds)
+      setMyPlayers(Object.fromEntries((ps || []).map(p => [p.id, p])))
+    }
   }, [league.id, week, myTeamId])
 
   useEffect(() => { reload() }, [reload])
@@ -5127,6 +5211,15 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
     setBusy(true); setMsg(null)
     try {
       const dropped = playersById[dropRow.player_id]
+      // Can't drop someone mid-game, and can't add a player whose game began
+      const koDrop = faKickoffs?.[dropped?.nfl_team]
+      const koAdd = faKickoffs?.[addPlayer.nfl_team]
+      if (koDrop && Date.now() >= koDrop.kickoff && ROSTER_SLOTS.includes(dropRow.slot)) {
+        throw new Error(`${dropped?.name}'s game has already started — you can't drop a starter mid-game.`)
+      }
+      if (koAdd && Date.now() >= koAdd.kickoff) {
+        throw new Error(`${addPlayer.name}'s game has already started — he isn't available until next week.`)
+      }
       // vacate the dropped player's slot; incoming takes it if legal, else it
       // stays put and the lineup-legality banner on My Team flags it
       const slot = slotAccepts(addPlayer.position, dropRow.slot) ? dropRow.slot
@@ -5186,36 +5279,89 @@ function FreeAgents({ league, teams, myTeamId, isLeagueAdmin }) {
           <div key={p.id} className={`pool-row pos-${p.position}`}>
             <span className="pname">{p.name}</span>
             <span className="pmeta">{p.position} · {p.nfl_team || 'FA'}</span>
+            <span className="prank" title="Kickoff">{faKickoffs ? gameLabel(faKickoffs[p.nfl_team]) : ''}</span>
             <span className="prank" title="This week's projection">{faProj[p.id] != null ? `${faProj[p.id]} proj` : '—'}</span>
             <span className="prank" title="2025 avg/game">{p.last_season_avg != null ? `${p.last_season_avg} avg` : '—'}</span>
-            <button className="btn btn-xs btn-primary" disabled={!canMove || busy}
-              onClick={() => setAdding(p)}>
-              ADD
-            </button>
+            {(() => {
+              const ko = faKickoffs?.[p.nfl_team]
+              const started = ko && Date.now() >= ko.kickoff
+              return (
+                <button className="btn btn-xs btn-primary" disabled={!canMove || busy || started}
+                  title={started ? 'His game has already started' : 'Add to your roster'}
+                  onClick={() => setAdding(p)}>
+                  {started ? 'LOCKED' : 'ADD'}
+                </button>
+              )
+            })()}
           </div>
         ))}
         {pool.length === 0 && <div className="pool-row">No free agents match.</div>}
       </div>
 
-      {adding && (
-        <div className="drop-picker">
-          <h3 className="display" style={{ fontSize: 20, margin: '14px 0 8px' }}>
-            Adding {adding.name} — who do you drop?
-          </h3>
-          {myRoster.map(r => {
-            const p = playersById[r.player_id]
-            return (
-              <div key={r.id} className="lineup-row tappable" onClick={() => executeAddDrop(adding, r)}>
-                <span className="lslot">{r.slot}</span>
-                <span className="lname">{p?.name || r.player_id}</span>
-                <span className="lmeta">{p?.position} · {p?.nfl_team || 'FA'}</span>
-              </div>
-            )
-          })}
-          <button className="btn btn-sm btn-ghost" onClick={() => setAdding(null)}>Cancel</button>
-        </div>
-      )}
       {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
+
+      {adding && (
+        <>
+          <div className="drawer-backdrop" onClick={() => setAdding(null)} />
+          <div className="release-sheet">
+            <div className="setup-head">
+              <div style={{ minWidth: 0 }}>
+                <span className="adv-label" style={{ margin: 0 }}>Adding</span>
+                <h2 style={{ marginBottom: 0, fontSize: 22 }}>{adding.name}</h2>
+                <p className="sub" style={{ marginBottom: 0, marginTop: 2 }}>
+                  {adding.position} · {adding.nfl_team || 'FA'}
+                  {faProj[adding.id] != null ? ` · ${faProj[adding.id]} proj` : ''}
+                </p>
+              </div>
+              <button className="drawer-close" onClick={() => setAdding(null)} aria-label="Cancel">✕</button>
+            </div>
+
+            <p className="sub" style={{ marginBottom: 10 }}>
+              Rosters hold {TOTAL_ROUNDS}. Choose who to release to make room.
+            </p>
+
+            <div className="release-list">
+              {[...myRoster]
+                .sort((a, b) => {
+                  const ai = ROSTER_SLOTS.indexOf(a.slot), bi = ROSTER_SLOTS.indexOf(b.slot)
+                  return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+                })
+                .map(r => {
+                  const p = myPlayers[r.player_id] || playersById[r.player_id]
+                  const ko = faKickoffs?.[p?.nfl_team]
+                  const started = ko && Date.now() >= ko.kickoff
+                  const isStarter = ROSTER_SLOTS.includes(r.slot)
+                  const blocked = started && isStarter
+                  return (
+                    <div key={r.id} className={`release-row ${blocked ? 'blocked' : ''}`}>
+                      <span className="lslot">{r.slot}</span>
+                      <span className="lname">
+                        {p?.name || r.player_id}
+                        <span className="lmeta" style={{ display: 'block' }}>
+                          {p?.position || '?'} · {p?.nfl_team || 'FA'}
+                          {faKickoffs ? ` · ${gameLabel(ko)}` : ''}
+                        </span>
+                      </span>
+                      <span className="tp-col">{faProj[r.player_id] != null ? faProj[r.player_id].toFixed(1) : '—'}</span>
+                      <button className={`btn btn-xs ${blocked ? '' : 'btn-primary'}`}
+                        disabled={busy || blocked}
+                        title={blocked ? 'His game has started — starters cannot be released mid-game' : 'Release and add'}
+                        onClick={() => executeAddDrop(adding, r)}>
+                        {blocked ? '🔒' : 'RELEASE'}
+                      </button>
+                    </div>
+                  )
+                })}
+              {myRoster.length === 0 && (
+                <p className="sub">Your roster is still loading — give it a second and try again.</p>
+              )}
+            </div>
+
+            <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12 }}
+              onClick={() => setAdding(null)}>Cancel</button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -5836,6 +5982,9 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
   const [moves, setMoves] = useState(0)
   const [view, setView] = useState('starters') // starters | bench | season
   const [swapFor, setSwapFor] = useState(null) // slot key whose picker is open
+  const [kickoffs, setKickoffs] = useState(null) // { TEAM: {kickoff, state} } | null
+  const [koErr, setKoErr] = useState(false)
+  const [nowMs, setNowMs] = useState(Date.now())
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -5909,8 +6058,50 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
     return () => { mounted = false; clearInterval(t) }
   }, [league.season, week, statsYear, statsWeek])
 
+  // Kickoff times drive per-player locks: a player is locked once HIS game
+  // starts, so Sunday and Monday starters stay editable after Thursday night.
+  useEffect(() => {
+    let mounted = true
+    const run = async () => {
+      try {
+        const map = await fetchKickoffs(league.season || CURRENT_SEASON, week)
+        if (mounted) { setKickoffs(map); setKoErr(false) }
+      } catch (e) {
+        console.warn('kickoff fetch failed:', e.message)
+        if (mounted) setKoErr(true)
+      }
+    }
+    run()
+    const t = setInterval(run, 300000) // refresh every 5 min for game states
+    return () => { mounted = false; clearInterval(t) }
+  }, [league.season, week])
+
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 30000)
+    return () => clearInterval(t)
+  }, [])
+
   const rowBySlot = useMemo(() => Object.fromEntries(roster.map(r => [r.slot, r])), [roster])
   const livePts = pid => fantasyPoints(stats[pid], playersById[pid]?.position)
+
+  // Is this specific player locked because his game has started?
+  const playerLocked = useCallback((p) => {
+    if (!p) return false
+    if (locked) return true            // commissioner hard lock overrides everything
+    if (!kickoffs) return false        // unknown schedule: stay permissive
+    const entry = kickoffs[p.nfl_team]
+    if (!entry) return false           // bye week or unknown team
+    return nowMs >= entry.kickoff
+  }, [kickoffs, nowMs, locked])
+
+  const nextKickoff = useMemo(() => {
+    if (!kickoffs) return null
+    const upcoming = roster
+      .map(r => kickoffs[playersById[r.player_id]?.nfl_team])
+      .filter(e => e && e.kickoff > nowMs)
+      .sort((a, b) => a.kickoff - b.kickoff)
+    return upcoming[0] || null
+  }, [kickoffs, roster, playersById, nowMs])
 
   // record / rank
   const rec = useMemo(() => {
@@ -5987,6 +6178,7 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
         if (r.id === row.id) return false
         const rp = playersById[r.player_id]
         if (!rp) return false
+        if (playerLocked(rp)) return false   // his game already kicked off
         return slotAccepts(rp.position, row.slot) && slotAccepts(p.position, r.slot)
       })
       .sort((a, b) => {
@@ -6001,7 +6193,7 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
   const candidatesForEmpty = (slot) =>
     roster.filter(r => {
       const rp = playersById[r.player_id]
-      return rp && slotAccepts(rp.position, slot)
+      return rp && !playerLocked(rp) && slotAccepts(rp.position, slot)
     }).sort((a, b) => (proj[b.player_id] || 0) - (proj[a.player_id] || 0))
 
   const renderPicker = (row, slot) => {
@@ -6043,11 +6235,14 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
     const row = rowBySlot[slot]
     const p = row ? playersById[row.player_id] : null
     const isOpen = swapFor === slot
+    const isLocked = playerLocked(p)
+    const tappable = canEdit && !isLocked
+    const entry = p && kickoffs ? kickoffs[p.nfl_team] : null
     return (
       <div key={slot}>
         <div
-          className={`lineup-row ${p ? `pos-${p.position}` : ''} ${isOpen ? 'sel' : ''} ${!row ? 'open' : ''} ${canEdit ? 'tappable' : ''}`}
-          onClick={() => canEdit && setSwapFor(isOpen ? null : slot)}>
+          className={`lineup-row ${p ? `pos-${p.position}` : ''} ${isOpen ? 'sel' : ''} ${!row ? 'open' : ''} ${tappable ? 'tappable' : ''} ${isLocked ? 'pl-locked' : ''}`}
+          onClick={() => tappable && setSwapFor(isOpen ? null : slot)}>
           <span className="lslot">{slot}</span>
           {p ? (
             <>
@@ -6055,20 +6250,23 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
                 {p.name}{injuryTag(p) && <span className={`inj-tag ${['OUT','IR'].includes(injuryTag(p)) ? 'bad' : ''}`}>{injuryTag(p)}</span>}
                 <span className="lmeta" style={{ display: 'block' }}>
                   {p.position} · {p.nfl_team || 'FA'}
+                  {kickoffs ? ` · ${gameLabel(entry)}` : ''}
                   {statLine(stats[p.id], p.position) ? ` · ${statLine(stats[p.id], p.position)}` : ''}
-                  {injuryTag(p) === 'OUT' && ' · swap recommended'}
+                  {injuryTag(p) === 'OUT' && !isLocked && ' · swap recommended'}
                 </span>
               </span>
               <span className="tp-col">{proj[p.id] != null ? proj[p.id].toFixed(1) : '—'}</span>
               <span className="tp-col">{p.last_season_avg != null ? p.last_season_avg.toFixed(1) : '—'}</span>
               <span className="tp-col tp-pts">{stats[p.id] ? livePts(p.id).toFixed(1) : '—'}</span>
-              {canEdit && <span className="swap-cue">{isOpen ? '▴' : 'SWAP'}</span>}
+              {canEdit && (
+                <span className="swap-cue">{isLocked ? '🔒' : isOpen ? '▴' : 'SWAP'}</span>
+              )}
             </>
           ) : (
             <span className="lmeta">Empty — tap to fill this slot</span>
           )}
         </div>
-        {isOpen && canEdit && renderPicker(row, slot)}
+        {isOpen && tappable && renderPicker(row, slot)}
       </div>
     )
   }
@@ -6119,14 +6317,21 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
           <div><span className="dt-label">Moves</span><b>{moves}</b></div>
         </div>
 
-        {locked && (
+        {locked ? (
           <div className="lock-banner">
-            Lineups are locked for week {week}
-            {isLeagueAdmin ? ' — commissioner override active, edits still allowed.' : '.'}
+            The commissioner has locked all lineups for week {week}
+            {isLeagueAdmin ? ' — override active, you can still edit.' : '.'}
           </div>
-        )}
-        {!locked && lockMs && (
-          <p className="sub" style={{ marginTop: 8 }}>Lineups lock {new Date(lockMs).toLocaleString()}.</p>
+        ) : koErr ? (
+          <div className="lock-banner">
+            Couldn't load kickoff times — showing everything as editable. Double-check before games start.
+          </div>
+        ) : (
+          <div className="window-banner">
+            <b>Lineups are open.</b> Each player locks when his own game kicks off — so you can still
+            change your Sunday and Monday starters after Thursday night.
+            {nextKickoff && <> Next kickoff: <b>{gameLabel(nextKickoff)}</b>.</>}
+          </div>
         )}
         {illegal && (
           <div className="lock-banner" style={{ background: 'rgba(255,90,90,0.14)', borderColor: 'var(--red)', color: 'var(--red-soft)' }}>
@@ -6194,7 +6399,8 @@ function TeamPage2({ league, teams, myTeamId, isLeagueAdmin }) {
 
         {canEdit && view !== 'season' && (
           <p className="sub" style={{ marginTop: 12 }}>
-            Tap any player to see who can replace them, then tap the replacement. Only position-legal options are shown.
+            Tap any player to see who can replace them, then tap the replacement. Players whose games
+            have started show 🔒 and can't be moved or swapped in.
           </p>
         )}
         {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
@@ -7026,22 +7232,17 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
     })
   }
 
+  // Lineups now lock per player at their own kickoff, so there is normally
+  // nothing to do here. The league-wide lock stays available as an override.
   steps.push({
     key: 'lock',
-    status: lockCoversTnf ? 'done' : (hrsToTnf != null && hrsToTnf < 6 ? 'urgent' : 'todo'),
-    when: 'Thursday, before 8:15pm ET',
-    title: 'Lock lineups for Thursday kickoff',
-    body: lockCoversTnf
-      ? `Lineups ${locked ? 'locked' : 'lock'} ${fmtEt(new Date(lockMs))} — before Thursday kickoff. You’re set.`
-      : lockSet
-        ? `Your lock is set for ${fmtEt(new Date(lockMs))}, which is AFTER Thursday kickoff. Anyone with a Thursday player could bench them after seeing the result.`
-        : `Thursday kickoff is ${tnf ? fmtEt(tnf) : 'this week'}. Lock before then, or Thursday games can be gamed.`,
-    action: lockCoversTnf
-      ? { label: 'Clear lock', fn: onClearLock, ghost: true }
-      : { label: 'Lock at Thursday 8:15pm ET', fn: onSetLock },
-    alt: !lockCoversTnf && onSetLockSunday
-      ? { label: 'No Thursday starters? Lock Sunday 1pm instead', fn: onSetLockSunday }
-      : null,
+    status: lockSet ? 'urgent' : 'done',
+    when: 'Automatic',
+    title: lockSet ? 'A league-wide lock is active' : 'Lineup locks are automatic',
+    body: lockSet
+      ? `Every roster is frozen until you clear this or advance the week (set for ${fmtEt(new Date(lockMs))}). Managers can't adjust their Sunday or Monday starters. Only keep this for special cases.`
+      : 'Each player locks the moment his own game kicks off — Thursday players at Thursday kickoff, Sunday players at theirs, and so on. Nothing for you to set.',
+    action: lockSet ? { label: 'Clear the league-wide lock', fn: onClearLock } : null,
   })
 
   const order = { urgent: 0, late: 1, todo: 2, optional: 3, done: 4, blocked: 5 }
@@ -7070,8 +7271,8 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
 
       <div className="cw-cadence">
         <span><b>Tue</b> — finalize · recap · advance</span>
-        <span><b>Thu</b> — refresh players · AI lineup · <b>lock by 8:15pm ET</b></span>
-        <span><b>Fri–Mon</b> — games run themselves</span>
+        <span><b>Thu</b> — refresh players · set the AI lineup before 8:15pm ET</span>
+        <span><b>Thu–Mon</b> — games run themselves; players lock at their own kickoff</span>
       </div>
 
       {steps.map(s => (
@@ -7100,8 +7301,8 @@ function CommishWeek({ league, teams, busy, setTab, onSetLock, onSetLockSunday, 
       ))}
 
       <p className="cw-foot">
-        Thursday 8:15pm ET is the real deadline — once TNF kicks off, lineups must already be locked.
-        Sundays and Mondays need nothing from you; scores update live on their own.
+        Managers can edit lineups all week; each player locks automatically at his own kickoff.
+        Your only hard deadline is the AI team's lineup before Thursday night. Scores update live on their own.
       </p>
     </div>
   )
