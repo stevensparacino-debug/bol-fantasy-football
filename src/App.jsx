@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // ============================================================
 const ADMIN_EMAIL = 'steven.sparacino@bol-agency.com'
 const LOGO_URL = 'https://stevensparacino-debug.github.io/bol-fantasy-football/icon/app-icon.svg'
-const BUILD = 'v9.48' // bump on every deploy — shown in footer so we always know what's live
+const BUILD = 'v9.50' // bump on every deploy — shown in footer so we always know what's live
 const MAX_TEAMS = 10
 const CURRENT_SEASON = 2026
 // ⚠️ REPLACE with your final GitHub Pages URL before committing
@@ -49,7 +49,7 @@ const slotAccepts = (position, slot) =>
 // machine with a chip on its shoulder and good-natured trash talk.
 // Web push: paste the PUBLIC half of your VAPID key pair here.
 // (Generate with: npx web-push generate-vapid-keys)
-const VAPID_PUBLIC_KEY = 'BL4qyMA48zMbUiqK-uWTIfHfBqMaZs-SL4dsXwaFAQeqQfXD3z-3ROGIaQVHQ0at9GkGlWhxlXzoi5cppAxqfT0'
+const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_VAPID_PUBLIC_KEY'
 const SW_PATH = '/bol-fantasy-football/sw.js'
 
 const AI_GM_PERSONA = [
@@ -588,7 +588,9 @@ select.input { appearance: none; }
 .bn-item:active { transform: scale(0.94); }
 .bn-item { transition: background 0.15s, color 0.15s, transform 0.12s; }
 .bn-ico { position: relative; display: inline-flex; }
-.bn-ico .nav-badge {
+.bn-ico .ham-wrap { position: relative; }
+.ham-badge { position: absolute; top: -5px; right: -5px; margin: 0; }
+.nav-badge {
   position: absolute; top: -5px; right: -9px; margin: 0;
 }
 @media (max-width: 860px) {
@@ -1799,6 +1801,12 @@ function App() {
   const [view, setView] = useState('home') // 'home' | 'mock'
   const [menuOpen, setMenuOpen] = useState(false)
   const [showSetup, setShowSetup] = useState(false)
+  const [tradeCount, setTradeCount] = useState(0)
+  useEffect(() => {
+    const onTrades = e => setTradeCount(e.detail || 0)
+    window.addEventListener('bolff-trades', onTrades)
+    return () => window.removeEventListener('bolff-trades', onTrades)
+  }, [])
 
   // The drawer lives above LeagueView in the tree, so nav requests travel by
   // a window event that LeagueView listens for. Keeps tab state where it is.
@@ -1893,7 +1901,9 @@ function App() {
             <span className="display logo"><span>FANTASY</span> FOOTBALL</span>
           </div>
           <div className="user">
-            <button className="hamburger" onClick={() => setMenuOpen(true)} aria-label="Open menu">☰</button>
+            <button className="hamburger ham-wrap" onClick={() => setMenuOpen(true)} aria-label="Open menu">
+              ☰{tradeCount > 0 && <span className="nav-badge ham-badge">{tradeCount}</span>}
+            </button>
           </div>
         </header>
       )}
@@ -1926,6 +1936,7 @@ function App() {
                     ['team', 'My team', 'team'],
                     ['scores', 'Matchup', 'matchup'],
                     ['players', 'Free agents', 'players'],
+                    ['trades', 'Trades', 'matchup'],
                     ['standings', 'Standings', 'league'],
                     ['feed', 'Feed', 'feed'],
                   ] : [['home', 'League', 'league'], ['feed', 'Feed', 'feed']]),
@@ -1933,6 +1944,9 @@ function App() {
                   <button key={key} className="drawer-item nav" onClick={() => goTo(key)}>
                     <NavIcon name={icon} size={19} />
                     <span>{label}</span>
+                    {key === 'trades' && tradeCount > 0 && (
+                      <span className="nav-badge" style={{ marginLeft: 'auto' }}>{tradeCount}</span>
+                    )}
                   </button>
                 ))}
                 <hr className="drawer-rule" />
@@ -2306,7 +2320,10 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
       const { count } = await supabase.from('trades')
         .select('id', { count: 'exact', head: true })
         .eq('league_id', leagueId).eq('to_team_id', tid).eq('status', 'pending')
-      if (mounted) setPendingTrades(count || 0)
+      if (mounted) {
+        setPendingTrades(count || 0)
+        window.dispatchEvent(new CustomEvent('bolff-trades', { detail: count || 0 }))
+      }
     })()
     return () => { mounted = false }
   }, [leagueId, myTeamId, teams, session.user.id, tradeTick])
@@ -2458,6 +2475,9 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           </button>
           <button className={`tab ${tab === 'scores' ? 'on' : ''}`} onClick={() => setTab('scores')}>Matchup</button>
           <button className={`tab ${tab === 'players' ? 'on' : ''}`} onClick={() => setTab('players')}>Players</button>
+          <button className={`tab ${tab === 'trades' ? 'on' : ''}`} onClick={() => setTab('trades')}>
+            Trades{pendingTrades > 0 && <span className="nav-badge">{pendingTrades}</span>}
+          </button>
           <button className={`tab ${tab === 'standings' ? 'on' : ''}`} onClick={() => setTab('standings')}>Standings</button>
           <button className={`tab ${tab === 'feed' ? 'on' : ''}`} onClick={() => setTab('feed')}>Feed</button>
           {(drafting || league.status === 'locked') && (
@@ -2484,10 +2504,7 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
             ['players', 'Players', 'players'], ['feed', 'Feed', 'feed'],
           ].map(([key, label, icon]) => (
             <button key={key} className={`bn-item ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>
-              <span className="bn-ico">
-                <NavIcon name={icon} />
-                {key === 'team' && pendingTrades > 0 && <span className="nav-badge">{pendingTrades}</span>}
-              </span>
+              <span className="bn-ico"><NavIcon name={icon} /></span>
               <span>{label}</span>
             </button>
           ))}
@@ -2537,6 +2554,8 @@ function LeagueView({ session, leagueId, initialLeague, myTeamId, isAdmin, isMoc
           myTeamId={resolvedTeamId}
           isLeagueAdmin={isLeagueAdmin}
         />
+      ) : active && tab === 'trades' ? (
+        <TradesPanel league={league} teams={teams} myTeamId={resolvedTeamId} />
       ) : active && tab === 'standings' ? (
         <Standings league={league} teams={teams} myTeamId={resolvedTeamId} isLeagueAdmin={isLeagueAdmin} />
       ) : (active || preDraft || drafting) && tab === 'feed' ? (
@@ -2594,7 +2613,7 @@ function LeagueHome({ league, teams, myTeamId, isLeagueAdmin, isMock, session, o
           <span>
             <b>TRADE OFFER</b> — you have {pendingTrades} pending offer{pendingTrades > 1 ? 's' : ''} waiting on a response.
           </span>
-          <button className="btn btn-xs btn-primary" onClick={() => setTab && setTab('team')}>REVIEW</button>
+          <button className="btn btn-xs btn-primary" onClick={() => setTab && setTab('trades')}>REVIEW</button>
         </div>
       )}
       {league.status === 'active' && (
@@ -3668,10 +3687,33 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock, pr
       const aiPicks = picks.filter(p => p.team_id === aiTeam.id).map(p => playersById[p.player_id]).filter(Boolean)
       const counts = {}
       aiPicks.forEach(p => { counts[p.position] = (counts[p.position] || 0) + 1 })
-      const needed = ['QB','RB','WR','TE','K','DEF'].filter(pos => {
-        const req = { QB:1, RB:2, WR:2, TE:1, K:1, DEF:1 }
-        return (counts[pos] || 0) < req[pos]
+      const REQ = { QB: 1, RB: 2, WR: 2, TE: 1, K: 1, DEF: 1 }
+      const needed = ['QB','RB','WR','TE','K','DEF'].filter(pos => (counts[pos] || 0) < REQ[pos])
+
+      // Hard guard: when remaining picks only just cover the unfilled starter
+      // slots, stop asking Claude and just fill them. Without this the AI will
+      // happily take a 6th receiver and finish the draft with no defense.
+      const aiPicksLeft = TOTAL_ROUNDS - aiPicks.length
+      const gaps = []
+      Object.entries(REQ).forEach(([pos, n]) => {
+        for (let i = counts[pos] || 0; i < n; i++) gaps.push(pos)
       })
+      if (gaps.length >= aiPicksLeft && gaps.length > 0) {
+        const forced = bestAvailable(players, draftedSet, aiPicks)
+        if (forced) {
+          const line = `Roster math says ${forced.position}. Not glamorous. Necessary.`
+          setAiLastPick({ name: forced.name, reason: line })
+          await makePick(onClockTeamId, forced.id, currentPick)
+          await supabase.from('feed_posts').insert({
+            league_id: league.id, user_id: aiTeam.user_id,
+            user_name: aiTeam.team_name, team_name: 'AI PICK',
+            body: `Round ${round}, pick ${currentPick + 1}: Drafted ${forced.name} ` +
+              `(${forced.position} · ${forced.nfl_team || 'FA'}). ${line}`,
+          })
+        }
+        setAiThinking(false)
+        return
+      }
       const avail = players
         .filter(p => !draftedSet.has(p.id) && (p.nfl_team || p.adp))
         .slice(0, 30)
@@ -3691,7 +3733,7 @@ function DraftRoom({ session, league, teams, myTeamId, isLeagueAdmin, isMock, pr
 ${roster}
 
 ` +
-        `POSITIONS STILL NEEDED: ${needed.join(', ') || 'starters filled — draft depth'}
+        `PICKS LEFT: ${aiPicksLeft}. POSITIONS STILL NEEDED (all must be filled before the draft ends): ${needed.join(', ') || 'none — draft depth'}
 
 ` +
         `TOP AVAILABLE PLAYERS:
@@ -4464,7 +4506,6 @@ function TeamPage({ league, teams, myTeamId, isLeagueAdmin }) {
         {msg && <p className={`msg ${msg.t}`}>{msg.v}</p>}
       </div>
 
-      <TradesPanel league={league} teams={teams} myTeamId={myTeamId} />
     </>
   )
 }
